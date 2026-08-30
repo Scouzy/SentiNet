@@ -1,5 +1,6 @@
 const BASE = '/api'
-export const WS_URL = `ws://${window.location.host}/ws`
+// wss:// automatiquement quand la page est servie en HTTPS (évite le mixed-content en prod)
+export const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
 
 const req = (method, url, body) =>
   fetch(`${BASE}${url}`, {

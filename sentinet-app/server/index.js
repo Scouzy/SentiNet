@@ -1,5 +1,7 @@
 'use strict'
 
+require('dotenv').config()
+
 const express = require('express')
 const cors = require('cors')
 const http = require('http')
@@ -12,6 +14,7 @@ const init = require('./data/initial')
 const detection = require('./services/detection')
 const audit = require('./services/audit')
 const whitelist = require('./services/whitelist')
+const platform = require('./services/platform')
 const bpfFilters = require('./data/bpf-filters.json')
 const retentionConfig = require('./config/retention.json')
 const QRCode = require('qrcode')
@@ -71,7 +74,7 @@ wss.on('error', (err) => {
   console.warn('[WSS] erreur serveur WebSocket :', err.message)
 })
 
-app.use(cors({ origin: '*' }))
+app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }))
 app.use(express.json())
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -86,7 +89,7 @@ function broadcast(msg) {
   wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(s) })
 }
 
-const PORT = 3010
+const PORT = Number(process.env.PORT) || 3010
 
 // ── Persistance : chargement initial depuis db.json ──────────────────────────
 function loadDb() {
@@ -167,21 +170,13 @@ app.get('/api/network/interfaces', (_req, res) => {
 
 // ── Active connections (real, via netstat) ────────────────────────────────────
 app.get('/api/network/connections', async (_req, res) => {
-  const { raw } = await run('netstat -an')
-  const conns = raw.split('\n')
-    .map(l => l.trim().split(/\s+/))
-    .filter(p => p[0] === 'TCP' || p[0] === 'UDP')
-    .map(p => ({ proto: p[0], local: p[1], remote: p[2], state: p[3] || '' }))
+  const conns = await platform.getConnections()
   res.json({ connections: conns, count: conns.length })
 })
 
 // ── ARP table (local hosts) ───────────────────────────────────────────────────
 app.get('/api/network/hosts', async (_req, res) => {
-  const { raw } = await run('arp -a')
-  const hosts = raw.split('\n')
-    .map(l => l.match(/^\s+([\d.]+)\s+([\w-]+)\s+(\w+)/))
-    .filter(Boolean)
-    .map(m => ({ ip: m[1], mac: m[2], type: m[3] }))
+  const hosts = await platform.getHosts()
   res.json({ hosts })
 })
 
@@ -189,9 +184,8 @@ app.get('/api/network/hosts', async (_req, res) => {
 app.get('/api/network/ping/:host', async (req, res) => {
   const h = req.params.host
   if (!/^[\w.\-]+$/.test(h)) return res.status(400).json({ error: 'Hôte invalide' })
-  const { raw } = await run(`ping -n 4 ${h}`)
-  const m = raw.match(/Average = (\d+)ms/)
-  res.json({ host: h, latency: m ? +m[1] : null })
+  const latency = await platform.ping(h)
+  res.json({ host: h, latency })
 })
 
 // ── Real adapter throughput (PowerShell) ──────────────────────────────────────
@@ -199,19 +193,7 @@ let prevAdapters = null
 let prevAdaptersTs = 0
 
 async function fetchAdapterStats() {
-  const ps = [
-    'powershell -NoProfile -NonInteractive -Command "',
-    'Get-NetAdapterStatistics |',
-    ' Where-Object {$_.ReceivedBytes -gt 0} |',
-    ' Select-Object Name,ReceivedBytes,SentBytes |',
-    ' ConvertTo-Json -Compress"'
-  ].join('')
-  const { raw, ok } = await run(ps)
-  if (!ok || !raw.trim()) return null
-  try {
-    const p = JSON.parse(raw.trim())
-    return Array.isArray(p) ? p : [p]
-  } catch { return null }
+  return platform.fetchAdapterStats()
 }
 
 function calcThroughput(adapters, prev, elapsed) {
@@ -309,10 +291,9 @@ app.post('/api/blocks', async (req, res) => {
   db.blocks.push(block)
   saveDb()
 
-  // Apply Windows Firewall rules (requires admin — graceful fallback if not)
-  const { ok: okIn } = await run(`netsh advfirewall firewall add rule name="${rule}_in" dir=in action=block remoteip=${ip} enable=yes`)
-  const { ok: okOut } = await run(`netsh advfirewall firewall add rule name="${rule}_out" dir=out action=block remoteip=${ip} enable=yes`)
-  block.fwStatus = (okIn && okOut) ? 'active' : 'tracked'
+  // Applique les règles pare-feu de l'OS (admin/root requis — repli gracieux sinon)
+  const applied = await platform.addFirewallBlock(ip, rule)
+  block.fwStatus = applied ? 'active' : 'tracked'
   if (!block.permanent) {
     const expiresTs = Date.now() + 2 * 3600 * 1000
     block.expires = new Date(expiresTs).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -333,8 +314,7 @@ app.delete('/api/blocks/:ip', async (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'Non trouvé' })
   const [b] = db.blocks.splice(idx, 1)
   if (b.fwStatus === 'active') {
-    await run(`netsh advfirewall firewall delete rule name="${b.rule}_in"`)
-    await run(`netsh advfirewall firewall delete rule name="${b.rule}_out"`)
+    await platform.removeFirewallBlock(ip, b.rule)
   }
   audit.write('UNBLOCK_HOST', 'user', ip, { rule: b.rule })
   saveDb()
@@ -662,12 +642,8 @@ wss.on('connection', (ws) => {
       // Memory
       const mem = (os.totalmem() - os.freemem()) / os.totalmem() * 100
 
-      // Active connections (netstat) + parse for detection
-      const { raw: ns } = await run('netstat -an')
-      const parsedConns = ns.split('\n')
-        .map(l => l.trim().split(/\s+/))
-        .filter(p => p[0] === 'TCP' || p[0] === 'UDP')
-        .map(p => ({ proto: p[0], local: p[1], remote: p[2], state: p[3] || '' }))
+      // Connexions actives (multi-OS) + analyse pour la détection
+      const parsedConns = await platform.getConnections()
       const conns = parsedConns.length
 
       // Real adapter throughput (computed first so detection can use inMbps)
@@ -721,8 +697,9 @@ wss.on('connection', (ws) => {
   setTimeout(tick, 500)
 })
 
-server.listen(PORT, () => {
-  console.log(`\n🛡️  SentiNet API  →  http://localhost:${PORT}`)
-  console.log(`🔌  WebSocket    →  ws://localhost:${PORT}`)
-  console.log(`🌐  Frontend     →  http://localhost:5210\n`)
+const HOST = process.env.HOST || '127.0.0.1'
+server.listen(PORT, HOST, () => {
+  console.log(`\n🛡️  SentiNet API  →  http://${HOST}:${PORT}`)
+  console.log(`🔌  WebSocket    →  ws://${HOST}:${PORT}`)
+  console.log(`🌐  Frontend     →  http://localhost:5210 (dev) / via nginx (prod)\n`)
 })

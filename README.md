@@ -29,7 +29,7 @@ L'interface web offre à l'analyste SOC un tableau de bord temps réel, la carto
 ## Fonctionnalités clés
 
 ### 🛰️ Collecte & observabilité
-- Capture des flux via les APIs natives de l'OS Windows (`netstat`, `ARP`, PowerShell `Get-NetAdapterStats`) — sans driver ni dépendance externe.
+- Capture des flux via les APIs natives de l'OS, **multi-plateforme** — Windows (`netstat`, `arp`, PowerShell, `netsh`) et Linux (`ss`, `ip neigh`, `ping`, `/proc/net/dev`, `iptables`) — sans driver ni dépendance externe.
 - Suivi et pruning des sessions TCP/UDP actives, ingestion des métadonnées de flux.
 - Filtres de capture BPF configurables par segment (DMZ, WAN, LAN est-ouest, DNS).
 - Synchronisation temporelle vérifiée (`w32tm` / NTP).
@@ -70,7 +70,7 @@ Tableau de bord temps réel · Cartographie réseau · Détection & règles · A
 | Routing | React Router 6 |
 | Backend API | Node.js 18+ / Express 4 (CommonJS) |
 | Temps réel | WebSocket (`ws`) |
-| Collecte réseau | Shells OS Windows (`netstat`, `ARP`, PowerShell, `netsh`) |
+| Collecte réseau | Shells OS multi-plateforme (Windows : `netstat`/PowerShell/`netsh` · Linux : `ss`/`ip`/`iptables`) |
 | Auth / MFA | `otplib` + `qrcode` |
 | Persistance | JSON on-disk (audit append-only, whitelist, signatures) |
 | Dev | `concurrently` (front + back en une commande) |
@@ -82,8 +82,8 @@ Détails complets dans **[`ARCHITECTURE.md`](ARCHITECTURE.md)**.
 ## Prérequis
 
 - **Node.js 18 ou supérieur** et **npm**
-- **Windows** (la collecte réseau et le blocage pare-feu s'appuient sur les commandes natives Windows : `netstat`, `netsh advfirewall`, PowerShell).
-- Droits **administrateur** recommandés pour les actions de blocage pare-feu.
+- **Windows** ou **Linux** — la collecte réseau et le blocage pare-feu sont portés sur les deux (Windows : `netstat`/`netsh`/PowerShell · Linux : `ss`/`ip`/`iptables`).
+- Droits **administrateur / root** (ou capacité `cap_net_admin`) recommandés pour l'application effective des blocages pare-feu. Sans privilèges, les blocages sont journalisés mais non appliqués (repli gracieux).
 
 ---
 
@@ -194,8 +194,25 @@ Les tâches restantes nécessitent soit du **hardware physique** (capture DPDK/P
 
 ---
 
+## Déploiement (VPS)
+
+Un guide complet de mise en production (Ubuntu/Debian, **nginx + PM2 + HTTPS Let's Encrypt**) est fourni dans **[`DEPLOYMENT.md`](DEPLOYMENT.md)**. Fichiers associés : `sentinet-app/ecosystem.config.cjs` (PM2) et `deploy/nginx-sentinet.conf` (reverse proxy).
+
+```bash
+# En résumé, sur le VPS :
+git clone https://github.com/Scouzy/SentiNet.git /var/www/sentinet
+cd /var/www/sentinet/sentinet-app
+cp .env.example .env          # renseigner PORT / CORS_ORIGIN
+npm install && npm run build
+pm2 start ecosystem.config.cjs && pm2 save
+# puis configurer nginx + certbot (voir DEPLOYMENT.md)
+```
+
+---
+
 ## Documentation
 
+- **[`DEPLOYMENT.md`](DEPLOYMENT.md)** — guide de déploiement VPS (nginx, PM2, HTTPS).
 - **[`ARCHITECTURE.md`](ARCHITECTURE.md)** — architecture technique, flux de données, sécurité, conformité, performances.
 - **[`Cahier_des_charges_SentiNet.md`](Cahier_des_charges_SentiNet.md)** — cahier des charges détaillé (exigences EF/ENF).
 - **[`Todolist_SentiNet.md`](Todolist_SentiNet.md)** — suivi d'avancement par phase.

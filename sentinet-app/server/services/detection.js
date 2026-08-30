@@ -308,23 +308,10 @@ function analyze(connections, inMbps = 0) {
   return results
 }
 
-// ── NTP check ─────────────────────────────────────────────────────────────────
-const { exec } = require('child_process')
+// ── NTP check (multi-OS, délégué à la couche plateforme) ──────────────────────
+const platform = require('./platform')
 function checkNtp() {
-  return new Promise(resolve => {
-    exec('w32tm /query /status', { timeout: 5000 }, (err, out) => {
-      if (err) return resolve({ synced: false, source: 'unknown', error: err.message })
-      const lines = out.split('\n').map(l => l.trim())
-      const sourceL = lines.find(l => l.startsWith('Source:'))
-      const strataL = lines.find(l => l.startsWith('Stratum:'))
-      resolve({
-        synced: !err,
-        source: sourceL ? sourceL.replace('Source:', '').trim() : 'unknown',
-        stratum: strataL ? strataL.replace('Stratum:', '').trim() : 'unknown',
-        raw: out.slice(0, 300),
-      })
-    })
-  })
+  return platform.checkNtp()
 }
 
 // ── Rule management API ───────────────────────────────────────────────────────
