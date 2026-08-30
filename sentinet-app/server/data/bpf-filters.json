@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "updatedAt": "2024-07-02T00:00:00Z",
+  "filters": [
+    {
+      "id": "BPF-001",
+      "name": "Capture trafic entrant DMZ",
+      "expression": "dst net 10.0.0.0/24 and not src host 10.0.0.1",
+      "interface": "eth0",
+      "enabled": true,
+      "segment": "DMZ",
+      "description": "Filtre entrant du segment DMZ, exclusion DC"
+    },
+    {
+      "id": "BPF-002",
+      "name": "Capture trafic WAN sortant",
+      "expression": "src net 192.168.0.0/16 and dst not net 10.0.0.0/8",
+      "interface": "eth1",
+      "enabled": true,
+      "segment": "WAN",
+      "description": "Trafic sortant vers Internet uniquement"
+    },
+    {
+      "id": "BPF-003",
+      "name": "Capture SMB LAN est/ouest",
+      "expression": "tcp port 445 or tcp port 139",
+      "interface": "eth2",
+      "enabled": true,
+      "segment": "LAN",
+      "description": "Flux SMB pour détection mouvement latéral"
+    },
+    {
+      "id": "BPF-004",
+      "name": "Capture DNS complet",
+      "expression": "udp port 53 or tcp port 53",
+      "interface": "any",
+      "enabled": true,
+      "segment": "ALL",
+      "description": "Toutes requêtes DNS — détection tunneling"
+    },
+    {
+      "id": "BPF-005",
+      "name": "Exclusion heartbeat monitoring",
+      "expression": "not (host 10.0.100.50 and icmp)",
+      "interface": "any",
+      "enabled": true,
+      "segment": "ALL",
+      "description": "Exclusion pings de supervision pour réduire le bruit"
+    },
+    {
+      "id": "BPF-006",
+      "name": "Décapsulation GRE",
+      "expression": "proto gre",
+      "interface": "eth1",
+      "enabled": false,
+      "segment": "WAN",
+      "description": "Capture tunnels GRE pour décapsulation et analyse L7"
+    }
+  ]
+}

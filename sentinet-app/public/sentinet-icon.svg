@@ -1,0 +1,35 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SentiNet">
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#123A63"/><stop offset="0.55" stop-color="#0E2C4E"/><stop offset="1" stop-color="#0A1F38"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3FE0C8"/><stop offset="1" stop-color="#1B6CA8"/>
+    </linearGradient>
+    <radialGradient id="sweep" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(128 112) scale(74)">
+      <stop offset="0" stop-color="#3FE0C8" stop-opacity="0.85"/><stop offset="0.55" stop-color="#2EC4B6" stop-opacity="0.28"/><stop offset="1" stop-color="#2EC4B6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#EAFFFB"/><stop offset="0.4" stop-color="#3FE0C8"/><stop offset="1" stop-color="#2EC4B6" stop-opacity="0"/>
+    </radialGradient>
+    <path id="shieldPath" d="M64,40 L192,40 Q212,40 212,60 L212,120 Q212,172 172,200 Q148,216 128,224 Q108,216 84,200 Q44,172 44,120 L44,60 Q44,40 64,40 Z"/>
+    <clipPath id="clip"><use href="#shieldPath"/></clipPath></defs>
+  <use href="#shieldPath" fill="url(#shield)"/>
+  <g clip-path="url(#clip)">
+    <path d="M64,40 L192,40 Q212,40 212,60 L212,96 Q128,64 44,96 L44,60 Q44,40 64,40 Z" fill="#FFFFFF" opacity="0.05"/>
+    <g fill="none" stroke="#2EC4B6" stroke-width="2">
+      <circle cx="128" cy="112" r="26" opacity="0.55"/><circle cx="128" cy="112" r="48" opacity="0.38"/><circle cx="128" cy="112" r="70" opacity="0.24"/>
+    </g>
+    <path d="M128,112 L128,38 A74,74 0 0 1 199,90 Z" fill="url(#sweep)"/>
+    <line x1="128" y1="112" x2="128" y2="38" stroke="#3FE0C8" stroke-width="2" opacity="0.8"/>
+    <g stroke="#5FE8D4" stroke-width="1.6" opacity="0.7">
+      <line x1="128" y1="112" x2="86" y2="150"/><line x1="128" y1="112" x2="176" y2="96"/><line x1="128" y1="112" x2="98" y2="76"/>
+      <line x1="86" y1="150" x2="150" y2="166"/><line x1="176" y1="96" x2="150" y2="166"/>
+    </g>
+    <g fill="#3FE0C8"><circle cx="86" cy="150" r="5"/><circle cx="176" cy="96" r="5"/><circle cx="98" cy="76" r="4.5"/><circle cx="150" cy="166" r="4.5"/></g>
+    <g fill="#0E2C4E"><circle cx="86" cy="150" r="2"/><circle cx="176" cy="96" r="2"/><circle cx="98" cy="76" r="1.8"/><circle cx="150" cy="166" r="1.8"/></g>
+    <circle cx="128" cy="112" r="18" fill="url(#coreGlow)"/>
+    <circle cx="128" cy="112" r="7.5" fill="#EAFFFB"/><circle cx="128" cy="112" r="7.5" fill="none" stroke="#0E2C4E" stroke-width="1.5"/>
+  </g>
+  <use href="#shieldPath" fill="none" stroke="url(#rim)" stroke-width="4"/>
+</svg>

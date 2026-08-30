@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "updatedAt": "2024-07-02T00:00:00Z",
+  "policies": {
+    "networkFlows": {
+      "label": "Flux réseau bruts",
+      "retentionDays": 30,
+      "compressionEnabled": true,
+      "encryptionEnabled": true,
+      "basis": "RGPD Art.5(1)(e) — durée limitée"
+    },
+    "alerts": {
+      "label": "Alertes de sécurité",
+      "retentionDays": 365,
+      "compressionEnabled": false,
+      "encryptionEnabled": true,
+      "basis": "Politique SSI — 1 an min"
+    },
+    "auditLog": {
+      "label": "Piste d'audit",
+      "retentionDays": 730,
+      "compressionEnabled": false,
+      "encryptionEnabled": true,
+      "basis": "EF-904 / RGPD Art.30 — 2 ans"
+    },
+    "pcapCaptures": {
+      "label": "Captures PCAP complètes",
+      "retentionDays": 7,
+      "compressionEnabled": true,
+      "encryptionEnabled": true,
+      "basis": "RGPD Art.5(1)(e) — minimisation données"
+    },
+    "sessionMetadata": {
+      "label": "Métadonnées de session",
+      "retentionDays": 90,
+      "compressionEnabled": true,
+      "encryptionEnabled": false,
+      "basis": "Loi LCEN — 1 an (3 mois actif)"
+    },
+    "systemLogs": {
+      "label": "Journaux système",
+      "retentionDays": 90,
+      "compressionEnabled": true,
+      "encryptionEnabled": false,
+      "basis": "Politique interne — 90 jours"
+    }
+  },
+  "pseudonymization": {
+    "enabled": true,
+    "fields": ["email", "username", "hostname"],
+    "algorithm": "SHA-256 + salt",
+    "saltRotationDays": 180
+  },
+  "purgeSchedule": {
+    "cron": "0 3 * * 0",
+    "label": "Chaque dimanche à 3h",
+    "notifyBefore": 7,
+    "approvalRequired": true
+  },
+  "dataSubjectRequests": {
+    "contact": "dpo@corp.fr",
+    "responseDeadlineDays": 30
+  }
+}

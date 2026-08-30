@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "updatedAt": "2024-07-02T00:00:00Z",
+  "assets": [
+    {
+      "id": 1,
+      "name": "Contrôleur de domaine principal",
+      "ip": "10.0.0.1",
+      "hostname": "DC-01.corp.local",
+      "type": "Serveur critique",
+      "criticality": "critical",
+      "owner": "DSI",
+      "addedAt": "2024-07-02T00:00:00Z",
+      "notes": "AD DS — jamais bloquer"
+    },
+    {
+      "id": 2,
+      "name": "Serveur de sauvegarde",
+      "ip": "10.0.0.10",
+      "hostname": "BACKUP-01.corp.local",
+      "type": "Serveur critique",
+      "criticality": "high",
+      "owner": "DSI",
+      "addedAt": "2024-07-02T00:00:00Z",
+      "notes": "Veeam — protéger de toute quarantaine"
+    },
+    {
+      "id": 3,
+      "name": "Passerelle VPN",
+      "ip": "192.168.1.1",
+      "hostname": "VPN-GW.corp.local",
+      "type": "Équipement réseau",
+      "criticality": "critical",
+      "owner": "Réseau",
+      "addedAt": "2024-07-02T00:00:00Z",
+      "notes": "Ne jamais bloquer — coupure totale d'accès"
+    },
+    {
+      "id": 4,
+      "name": "Serveur DNS interne",
+      "ip": "10.0.0.2",
+      "hostname": "DNS-01.corp.local",
+      "type": "Serveur critique",
+      "criticality": "high",
+      "owner": "Réseau",
+      "addedAt": "2024-07-02T00:00:00Z",
+      "notes": "Résolution DNS — critique pour toutes les communications"
+    },
+    {
+      "id": 5,
+      "name": "Sonde SentiNet PROBE-LAN-01",
+      "ip": "10.0.100.1",
+      "hostname": "PROBE-LAN-01",
+      "type": "Sonde SOC",
+      "criticality": "critical",
+      "owner": "SOC",
+      "addedAt": "2024-07-02T00:00:00Z",
+      "notes": "Jamais bloquer une sonde — perte de visibilité"
+    }
+  ]
+}
