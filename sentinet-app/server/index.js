@@ -15,6 +15,9 @@ const detection = require('./services/detection')
 const audit = require('./services/audit')
 const whitelist = require('./services/whitelist')
 const platform = require('./services/platform')
+const auth = require('./services/auth')
+const threatintel = require('./services/threatintel')
+const mitreTaxonomy = require('./data/mitre.json')
 const bpfFilters = require('./data/bpf-filters.json')
 const retentionConfig = require('./config/retention.json')
 const QRCode = require('qrcode')
@@ -132,6 +135,44 @@ function saveRules() {
 const db = loadDb()
 db.dynamicAlerts = []
 
+// Retire les champs sensibles avant d'exposer un utilisateur via l'API
+function publicUser(u) {
+  if (!u) return u
+  const { passwordHash, mfaSecret, mfaPending, ...rest } = u
+  return { ...rest, hasPassword: !!passwordHash }
+}
+
+// ── Playbooks SOAR (config persistée + exécutions réelles) ────────────────────
+const PB_PATH = path.join(__dirname, 'data', 'playbooks.json')
+let playbooks = []
+try { playbooks = JSON.parse(fs.readFileSync(PB_PATH, 'utf8')) } catch { playbooks = [] }
+function savePlaybooks() {
+  try { fs.writeFileSync(PB_PATH, JSON.stringify(playbooks, null, 2)) } catch (e) { console.warn('[PB] écriture:', e.message) }
+}
+function runPlaybook(id, ok = true) {
+  const pb = playbooks.find(p => p.id === id)
+  if (!pb || pb.status !== 'active') return
+  pb.executions++
+  if (ok) pb.success++
+  pb.lastRun = new Date().toISOString()
+  savePlaybooks()
+}
+
+// Dernières métriques hôte (pour l'endpoint /api/sensors)
+let lastMetrics = { cpu: 0, mem: 0, conns: 0 }
+
+// ── Registre des agents distants (sondes est-ouest) — alimenté en Phase 3 ─────
+const agents = new Map() // agentId -> { id, host, segment, load, connections, interfaces, version, lastSeen, lastSeenTs }
+function agentSensors() {
+  const now = Date.now()
+  return [...agents.values()].map(a => ({
+    id: a.id, host: a.host, segment: a.segment || `Agent ${a.host}`, mode: 'IDS',
+    status: (now - (a.lastSeenTs || 0) < 30000) ? 'online' : 'offline',
+    load: a.load || 0, connections: a.connections || 0, interfaces: a.interfaces || 0,
+    droppedPct: 0, version: a.version || '3.2', kind: 'agent', lastSeen: a.lastSeen,
+  }))
+}
+
 // ── EventBus — detection engine → alerts store ────────────────────────────────
 detection.bus.on('alert', (alert) => {
   db.alerts.unshift(alert)
@@ -139,6 +180,14 @@ detection.bus.on('alert', (alert) => {
   db.dynamicAlerts.unshift(alert)
   if (db.dynamicAlerts.length > 100) db.dynamicAlerts.splice(100)
   audit.write('DETECTION_ALERT', 'system', alert.source, { type: alert.type, severity: alert.severity, mitre: alert.mitre })
+  // Déclenchement des playbooks SOAR sur événements réels (EF-504)
+  try {
+    if (alert.severity === 'critical') runPlaybook('PB-005')
+    const t = (alert.type || '').toLowerCase()
+    if (t.includes('beacon') || t.includes('c2') || t.includes('ioc') || t.includes('malveillante')) runPlaybook('PB-004')
+    if (t.includes('latéral') || t.includes('lateral')) runPlaybook('PB-002')
+    if (t.includes('volumétrique') || t.includes('trafic anormal') || t.includes('ddos')) runPlaybook('PB-003')
+  } catch {}
   broadcast({ type: 'alert', data: alert })
   saveDb()
 })
@@ -153,6 +202,64 @@ const run = (cmd) => new Promise((resolve) =>
     resolve({ ok: !err, raw: out || '', err: err ? err.message : null })
   )
 )
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Authentification (EF-901/903) — routes publiques
+// ═══════════════════════════════════════════════════════════════════════════
+
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body || {}
+  const u = db.users.find(x => (x.email || '').toLowerCase() === String(email || '').toLowerCase())
+  if (!u || !u.passwordHash || !auth.verifyPassword(password, u.passwordHash)) {
+    audit.write('LOGIN_FAIL', String(email || 'inconnu'), String(email || '-'), {})
+    return res.status(401).json({ error: 'Identifiants invalides' })
+  }
+  if (u.status && u.status !== 'active') {
+    return res.status(403).json({ error: 'Compte désactivé' })
+  }
+  // MFA activé → étape 2 obligatoire
+  if (u.mfa && u.mfaSecret) {
+    const tempToken = auth.signToken({ scope: 'mfa', uid: u.id }, auth.MFA_TTL)
+    audit.write('LOGIN_PASSWORD_OK', u.email, u.email, { mfa: 'required' })
+    return res.json({ mfaRequired: true, tempToken })
+  }
+  u.lastLogin = new Date().toISOString()
+  saveDb()
+  const token = auth.signToken({ scope: 'session', uid: u.id, email: u.email, role: u.role, name: u.name })
+  audit.write('LOGIN_SUCCESS', u.email, u.email, { mfa: false })
+  res.json({ token, user: publicUser(u) })
+})
+
+app.post('/api/auth/mfa', (req, res) => {
+  const { tempToken, code } = req.body || {}
+  const p = auth.verifyToken(tempToken)
+  if (!p || p.scope !== 'mfa') return res.status(401).json({ error: 'Session MFA expirée — reconnectez-vous' })
+  const u = db.users.find(x => x.id === p.uid)
+  if (!u || !u.mfaSecret) return res.status(401).json({ error: 'Utilisateur introuvable' })
+  if (!totpVerify(u.mfaSecret, code)) {
+    audit.write('LOGIN_MFA_FAIL', u.email, u.email, {})
+    return res.status(422).json({ error: 'Code MFA incorrect ou expiré' })
+  }
+  u.lastLogin = new Date().toISOString()
+  saveDb()
+  const token = auth.signToken({ scope: 'session', uid: u.id, email: u.email, role: u.role, name: u.name })
+  audit.write('LOGIN_SUCCESS', u.email, u.email, { mfa: true })
+  res.json({ token, user: publicUser(u) })
+})
+
+app.get('/api/auth/me', auth.requireAuth, (req, res) => {
+  const u = db.users.find(x => x.id === req.user.uid)
+  if (!u) return res.status(404).json({ error: 'Utilisateur introuvable' })
+  res.json({ user: publicUser(u) })
+})
+
+app.post('/api/auth/logout', (_req, res) => res.json({ ok: true })) // jeton sans état : le client le supprime
+
+// ═══ Garde d'authentification : toutes les autres routes /api sont protégées ═══
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth')) return next()
+  auth.requireAuth(req, res, next)
+})
 
 // ── Network interfaces (real, from OS) ────────────────────────────────────────
 app.get('/api/network/interfaces', (_req, res) => {
@@ -304,6 +411,7 @@ app.post('/api/blocks', async (req, res) => {
     const a = db.alerts.find(x => x.id === alertId)
     if (a) a.status = 'blocked'
   }
+  runPlaybook('PB-001', block.fwStatus === 'active') // playbook « Blocage hôte malveillant »
   saveDb()
   res.json({ block })
 })
@@ -333,23 +441,27 @@ app.patch('/api/blocks/:ip', async (req, res) => {
 })
 
 // ── Users CRUD ────────────────────────────────────────────────────────────────
-app.get('/api/users', (_req, res) => res.json({ users: db.users }))
+app.get('/api/users', (_req, res) => res.json({ users: db.users.map(publicUser) }))
 
 app.post('/api/users', (req, res) => {
-  const u = { id: Date.now(), mfa: false, status: 'active', lastLogin: null, ...req.body }
+  const { password, passwordHash: _ignore, createdBy, ...fields } = req.body || {}
+  const u = { id: Date.now(), mfa: false, status: 'active', lastLogin: null, ...fields }
+  if (password) u.passwordHash = auth.hashPassword(password)
   db.users.push(u)
-  audit.write('USER_CREATE', req.body.createdBy || 'admin', u.email, { role: u.role })
+  audit.write('USER_CREATE', createdBy || (req.user && req.user.email) || 'admin', u.email, { role: u.role })
   saveDb()
-  res.json({ user: u })
+  res.json({ user: publicUser(u) })
 })
 
 app.patch('/api/users/:id', (req, res) => {
   const u = db.users.find(x => String(x.id) === req.params.id)
   if (!u) return res.status(404).json({ error: 'Non trouvé' })
-  Object.assign(u, req.body)
-  audit.write('USER_UPDATE', 'admin', u.email, req.body)
+  const { password, passwordHash: _ignore, ...fields } = req.body || {}
+  Object.assign(u, fields)
+  if (password) u.passwordHash = auth.hashPassword(password)
+  audit.write('USER_UPDATE', (req.user && req.user.email) || 'admin', u.email, Object.keys({ ...fields, ...(password ? { password: '***' } : {}) }))
   saveDb()
-  res.json({ user: u })
+  res.json({ user: publicUser(u) })
 })
 
 app.delete('/api/users/:id', (req, res) => {
@@ -365,7 +477,7 @@ app.post('/api/users/force-mfa', (_req, res) => {
   db.users.forEach(u => { u.mfa = true })
   audit.write('FORCE_MFA', 'admin', 'all_users', {})
   saveDb()
-  res.json({ ok: true, users: db.users })
+  res.json({ ok: true, users: db.users.map(publicUser) })
 })
 
 // ── MFA TOTP enrollment ───────────────────────────────────────────────────────
@@ -394,7 +506,7 @@ app.post('/api/users/:id/mfa/verify', (req, res) => {
   u.mfa = true
   audit.write('MFA_ENROLLED', u.email || 'user', u.email, {})
   saveDb()
-  res.json({ ok: true, user: { ...u, mfaSecret: undefined, mfaPending: undefined } })
+  res.json({ ok: true, user: publicUser(u) })
 })
 
 // Désactiver le MFA d'un utilisateur
@@ -406,7 +518,7 @@ app.delete('/api/users/:id/mfa', (req, res) => {
   delete u.mfaPending
   audit.write('MFA_DISABLED', 'admin', u.email, {})
   saveDb()
-  res.json({ ok: true, user: u })
+  res.json({ ok: true, user: publicUser(u) })
 })
 
 // ── Detection rules CRUD ──────────────────────────────────────────────────────
@@ -481,13 +593,92 @@ app.post('/api/threat-intel/ioc', (req, res) => {
   const { ip } = req.body
   if (!ip) return res.status(400).json({ error: 'IP requise' })
   detection.addIoC(ip)
-  audit.write('IOC_ADD', 'user', ip, {})
+  threatintel.addCustom(ip)
+  audit.write('IOC_ADD', (req.user && req.user.email) || 'user', ip, {})
   res.json({ ok: true, ip })
 })
 
 app.get('/api/threat-intel/check/:ip', (req, res) => {
   const ip = req.params.ip
   res.json({ ip, malicious: detection.KNOWN_BAD_IPS.has(ip) })
+})
+
+// ── Vrais flux de threat intelligence (EF-801/802) ────────────────────────────
+app.get('/api/threat-intel/feeds', (_req, res) => {
+  const observed = new Set()
+  for (const c of lastParsedConns) {
+    const ip = (c.remote || '').replace(/^\[|\]$/g, '').split(':').slice(0, -1).join(':')
+    if (ip) observed.add(ip)
+  }
+  for (const a of db.alerts) { if (a.source) observed.add(a.source); if (a.destination) observed.add(a.destination) }
+  res.json({ feeds: threatintel.getFeeds(observed), totalIocs: threatintel.allIps().size })
+})
+
+// ── Couverture MITRE ATT&CK calculée depuis les vraies alertes (EF-803) ───────
+app.get('/api/detection/mitre', (_req, res) => {
+  const ruleTechs = new Set(detection.getRules().filter(r => r.enabled).map(r => r.mitre).filter(Boolean))
+  const ENGINE = new Set(['T1071.001', 'T1021.002', 'T1046', 'T1071', 'T1498'])
+  const counts = {}
+  for (const a of db.alerts) { if (a.mitre) counts[a.mitre] = (counts[a.mitre] || 0) + 1 }
+  const tactics = mitreTaxonomy.map(t => ({
+    tactic: t.tactic, id: t.id,
+    techniques: t.techniques.map(tech => {
+      const detections = counts[tech.id] || 0
+      return { id: tech.id, name: tech.name, covered: ENGINE.has(tech.id) || ruleTechs.has(tech.id) || detections > 0, detections }
+    }),
+  }))
+  const all = tactics.flatMap(t => t.techniques)
+  const covered = all.filter(t => t.covered).length
+  res.json({
+    tactics,
+    total: all.length,
+    covered,
+    coveragePct: all.length ? Math.round(covered / all.length * 100) : 0,
+    totalDetections: all.reduce((s, t) => s + t.detections, 0),
+  })
+})
+
+// ── Playbooks SOAR (EF-504) ───────────────────────────────────────────────────
+app.get('/api/playbooks', (_req, res) => res.json({ playbooks }))
+
+app.post('/api/playbooks/:id/run', (req, res) => {
+  const pb = playbooks.find(p => p.id === req.params.id)
+  if (!pb) return res.status(404).json({ error: 'Playbook introuvable' })
+  runPlaybook(pb.id)
+  audit.write('PLAYBOOK_MANUAL_RUN', (req.user && req.user.email) || 'user', pb.id, { name: pb.name })
+  res.json({ playbook: pb })
+})
+
+app.patch('/api/playbooks/:id', (req, res) => {
+  const pb = playbooks.find(p => p.id === req.params.id)
+  if (!pb) return res.status(404).json({ error: 'Playbook introuvable' })
+  const { status, mode } = req.body || {}
+  if (status) pb.status = status
+  if (mode) pb.mode = mode
+  savePlaybooks()
+  audit.write('PLAYBOOK_UPDATE', (req.user && req.user.email) || 'admin', pb.id, { status: pb.status, mode: pb.mode })
+  res.json({ playbook: pb })
+})
+
+// ── Capteurs / sondes réels (EF-905) ──────────────────────────────────────────
+app.get('/api/sensors', (_req, res) => {
+  const ifaces = Object.values(os.networkInterfaces()).flat().filter(a => a && !a.internal).length
+  const local = {
+    id: 'SENSOR-LOCAL',
+    host: os.hostname(),
+    segment: 'Hôte local (auto-surveillance)',
+    mode: 'IDS',
+    status: 'online',
+    load: lastMetrics.cpu || 0,
+    connections: lastParsedConns.length,
+    interfaces: ifaces,
+    droppedPct: 0,
+    version: '3.2',
+    kind: 'local',
+    lastSeen: new Date().toISOString(),
+  }
+  const sensors = [local, ...agentSensors()]
+  res.json({ sensors, online: sensors.filter(s => s.status === 'online').length, total: sensors.length })
 })
 
 // ── Données réelles : trafic, protocoles, top-talkers, tendances alertes ────────
@@ -620,7 +811,14 @@ app.get('/api/export/alerts', (_req, res) => {
 // ── WebSocket — live metrics every 3 s ───────────────────────────────────────
 let wsAdapters = null, wsAdaptersTs = 0
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Authentification du WebSocket : jeton passé en paramètre de requête (?token=)
+  try {
+    const u = new URL(req.url, 'http://localhost')
+    const payload = auth.verifyToken(u.searchParams.get('token'))
+    if (!payload || payload.scope !== 'session') { ws.close(4001, 'unauthorized'); return }
+  } catch { ws.close(4001, 'unauthorized'); return }
+
   let dead = false
   ws.on('close', () => { dead = true })
   ws.on('error', (err) => {
@@ -645,6 +843,7 @@ wss.on('connection', (ws) => {
       // Connexions actives (multi-OS) + analyse pour la détection
       const parsedConns = await platform.getConnections()
       const conns = parsedConns.length
+      lastMetrics = { cpu: +cpu.toFixed(1), mem: +mem.toFixed(1), conns }
 
       // Real adapter throughput (computed first so detection can use inMbps)
       let inMbps = 0, outMbps = 0
@@ -703,3 +902,12 @@ server.listen(PORT, HOST, () => {
   console.log(`🔌  WebSocket    →  ws://${HOST}:${PORT}`)
   console.log(`🌐  Frontend     →  http://localhost:5210 (dev) / via nginx (prod)\n`)
 })
+
+// ── Chargement des flux de threat intelligence (réels) au démarrage + refresh ─
+;(async () => {
+  try {
+    const s = await threatintel.refresh(detection)
+    console.log(`[TI] Threat intel chargée : ${s.totalIocs} IoC depuis ${s.feeds.length} flux`)
+  } catch (e) { console.warn('[TI] chargement initial:', e.message) }
+})()
+setInterval(() => { threatintel.refresh(detection).catch(() => {}) }, 6 * 3600 * 1000)

@@ -1,0 +1,8 @@
+[
+  { "id": "PB-001", "name": "Blocage hôte malveillant", "trigger": "Blocage IP (API / score de risque élevé)", "mode": "automatique", "status": "active", "executions": 0, "success": 0, "lastRun": null },
+  { "id": "PB-002", "name": "Quarantaine / isolation d'hôte", "trigger": "Mouvement latéral détecté", "mode": "semi-automatique", "status": "active", "executions": 0, "success": 0, "lastRun": null },
+  { "id": "PB-003", "name": "Atténuation DDoS", "trigger": "Pic volumétrique anormal", "mode": "automatique", "status": "active", "executions": 0, "success": 0, "lastRun": null },
+  { "id": "PB-004", "name": "Réinitialisation connexion C2", "trigger": "Beaconing / IoC confirmé", "mode": "automatique", "status": "active", "executions": 0, "success": 0, "lastRun": null },
+  { "id": "PB-005", "name": "Notification RSSI", "trigger": "Alerte critique", "mode": "automatique", "status": "active", "executions": 0, "success": 0, "lastRun": null },
+  { "id": "PB-006", "name": "Confinement ransomware", "trigger": "Chiffrement de masse détecté", "mode": "semi-automatique", "status": "active", "executions": 0, "success": 0, "lastRun": null }
+]

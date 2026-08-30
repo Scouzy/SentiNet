@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { WS_URL } from '../services/api'
+import { getWsUrl } from '../services/api'
 
 const RING_SIZE = 40
 
@@ -18,7 +18,7 @@ export function useWebSocket() {
     const connect = () => {
       if (!alive) return
       try {
-        const ws = new WebSocket(WS_URL)
+        const ws = new WebSocket(getWsUrl())
         wsRef.current = ws
 
         ws.onopen = () => { if (alive) setConnected(true) }

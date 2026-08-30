@@ -1,14 +1,40 @@
 const BASE = '/api'
-// wss:// automatiquement quand la page est servie en HTTPS (évite le mixed-content en prod)
-export const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
+
+// ── Jeton de session ──────────────────────────────────────────────────────────
+const TOKEN_KEY = 'sentinet_token'
+let authToken = null
+try { authToken = localStorage.getItem(TOKEN_KEY) } catch {}
+
+export function setToken(t) {
+  authToken = t || null
+  try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY) } catch {}
+}
+export function getToken() { return authToken }
+
+// URL WebSocket avec jeton (wss:// automatique en HTTPS)
+export function getWsUrl() {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const base = `${proto}://${window.location.host}/ws`
+  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base
+}
+export const WS_URL = getWsUrl() // rétro-compat
 
 const req = (method, url, body) =>
   fetch(`${BASE}${url}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   }).then(async r => {
-    const data = await r.json()
+    let data = {}
+    try { data = await r.json() } catch {}
+    // Session expirée/invalide → déconnexion globale (sauf sur les routes d'auth)
+    if (r.status === 401 && !url.startsWith('/auth')) {
+      setToken(null)
+      window.dispatchEvent(new Event('sentinet-unauthorized'))
+    }
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
     return data
   })
@@ -19,6 +45,12 @@ const patch = (url, body) => req('PATCH', url, body)
 const del = (url) => req('DELETE', url)
 
 export const api = {
+  // Auth
+  login: (email, password) => post('/auth/login', { email, password }),
+  mfaLogin: (tempToken, code) => post('/auth/mfa', { tempToken, code }),
+  me: () => get('/auth/me'),
+  logout: () => post('/auth/logout', {}),
+
   // Network
   getInterfaces: () => get('/network/interfaces'),
   getConnections: () => get('/network/connections'),
@@ -46,6 +78,20 @@ export const api = {
   mfaSetup: (id) => post(`/users/${id}/mfa/setup`, {}),
   mfaVerify: (id, token) => post(`/users/${id}/mfa/verify`, { token }),
   mfaDisable: (id) => del(`/users/${id}/mfa`),
+
+  // Sensors / sondes réelles
+  getSensors: () => get('/sensors'),
+
+  // Playbooks SOAR
+  getPlaybooks: () => get('/playbooks'),
+  runPlaybook: (id) => post(`/playbooks/${id}/run`, {}),
+  updatePlaybook: (id, data) => patch(`/playbooks/${id}`, data),
+
+  // MITRE ATT&CK (couverture réelle)
+  getMitre: () => get('/detection/mitre'),
+
+  // Threat intel feeds réels
+  getThreatFeeds: () => get('/threat-intel/feeds'),
 
   // Detection rules
   getDetectionRules: () => get('/detection/rules'),
@@ -92,6 +138,7 @@ export const api = {
   addIoC: (ip) => post('/threat-intel/ioc', { ip }),
   checkIoC: (ip) => get(`/threat-intel/check/${ip}`),
 
-  // Export / SIEM
-  exportAlerts: (format = 'json') => `${BASE}/export/alerts?format=${format}`,
+  // Export / SIEM (jeton en query : le téléchargement par lien porte l'auth)
+  exportAlerts: (format = 'json') =>
+    `${BASE}/export/alerts?format=${format}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
 }

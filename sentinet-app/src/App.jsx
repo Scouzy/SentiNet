@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
+import { LoaderCircle } from 'lucide-react'
 import { ToastProvider } from './components/UI/Toast'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Layout/Sidebar'
 import Header from './components/Layout/Header'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Alerts from './pages/Alerts'
 import Network from './pages/Network'
@@ -25,7 +28,16 @@ const routes = [
   { path: '/admin', element: <Admin />, title: 'Administration', subtitle: 'Utilisateurs, sondes et paramètres système' },
 ]
 
-function AppContent() {
+function Splash() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-dark-900">
+      <LoaderCircle className="w-6 h-6 text-cyber-400 animate-spin" />
+    </div>
+  )
+}
+
+// Enveloppe protégée : layout SOC (sidebar + header + contenu via <Outlet/>)
+function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
@@ -51,7 +63,6 @@ function AppContent() {
 
   return (
     <div className="flex min-h-screen bg-dark-900 bg-grid-pattern">
-      {/* Backdrop mobile */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-20 bg-dark-900/75 backdrop-blur-sm md:hidden"
@@ -74,14 +85,39 @@ function AppContent() {
           onMenuToggle={() => setMobileOpen(p => !p)}
         />
         <main className="flex-1 overflow-auto">
-          <Routes>
-            {routes.map(({ path, element }) => (
-              <Route key={path} path={path} element={element} />
-            ))}
-          </Routes>
+          <Outlet />
         </main>
       </div>
     </div>
+  )
+}
+
+// Garde d'accès
+function Protected({ children }) {
+  const { user, loading } = useAuth()
+  if (loading) return <Splash />
+  if (!user) return <Navigate to="/login" replace />
+  return children
+}
+
+function LoginGate() {
+  const { user, loading } = useAuth()
+  if (loading) return <Splash />
+  if (user) return <Navigate to="/" replace />
+  return <Login />
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginGate />} />
+      <Route element={<Protected><AppShell /></Protected>}>
+        {routes.map(({ path, element }) => (
+          <Route key={path} path={path} element={element} />
+        ))}
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 
@@ -89,7 +125,9 @@ export default function App() {
   return (
     <ToastProvider>
       <BrowserRouter>
-        <AppContent />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
     </ToastProvider>
   )

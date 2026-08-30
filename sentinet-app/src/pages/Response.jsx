@@ -3,7 +3,6 @@ import {
   Zap, Shield, Clock, CheckCircle, XCircle, AlertTriangle,
   Play, Pause, RotateCcw, Ban, Lock, Server, ChevronRight, Eye, Loader2
 } from 'lucide-react'
-import { playbooks } from '../data/mockData'
 import { api } from '../services/api'
 import { useToast } from '../components/UI/Toast'
 
@@ -75,7 +74,7 @@ function PlaybookCard({ pb, onDetails, onSuspend }) {
 
 export default function Response() {
   const [activeTab, setActiveTab] = useState('playbooks')
-  const [pbList, setPbList] = useState(playbooks)
+  const [pbList, setPbList] = useState([])
   const [detailsPb, setDetailsPb] = useState(null)
   const [blockedHosts, setBlockedHosts] = useState([])
   const [actionLog, setActionLog] = useState([])
@@ -83,14 +82,23 @@ export default function Response() {
   const [loadingIp, setLoadingIp] = useState(null)
   const { toast } = useToast()
 
-  const handleSuspend = useCallback((id) => {
-    setPbList(prev => prev.map(p => {
-      if (p.id !== id) return p
-      const next = p.status === 'active' ? 'suspended' : 'active'
+  const handleSuspend = useCallback(async (id) => {
+    const pb = pbList.find(p => p.id === id)
+    if (!pb) return
+    const next = pb.status === 'active' ? 'suspended' : 'active'
+    try {
+      const d = await api.updatePlaybook(id, { status: next })
+      setPbList(prev => prev.map(p => p.id === id ? d.playbook : p))
       toast(next === 'suspended' ? `Playbook ${id} suspendu` : `Playbook ${id} activé`, next === 'suspended' ? 'warning' : 'success')
-      return { ...p, status: next }
-    }))
-  }, [toast])
+    } catch (e) { toast(e.message || 'Erreur', 'error') }
+  }, [pbList, toast])
+
+  useEffect(() => {
+    const load = () => api.getPlaybooks().then(d => setPbList(d.playbooks || [])).catch(() => {})
+    load()
+    const id = setInterval(load, 5000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     api.getBlocks().then(d => setBlockedHosts(d.blocks || [])).catch(() => {})

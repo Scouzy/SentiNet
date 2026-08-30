@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Shield, CheckCircle, XCircle, ChevronDown, ChevronRight, Target, Zap, Brain, Search, Plus, Trash2, ToggleLeft, ToggleRight, Activity, Loader2, RefreshCw, AlertTriangle, Ban, ArrowUpRight } from 'lucide-react'
-import { mitreAttackData } from '../data/mockData'
 import { api } from '../services/api'
 import { useToast } from '../components/UI/Toast'
 import { useWebSocket } from '../hooks/useWebSocket'
@@ -156,6 +155,7 @@ export default function Detection() {
   const [expandedTactic, setExpandedTactic] = useState(null)
   const [rules, setRules] = useState([])
   const [liveAlerts, setLiveAlerts] = useState([])
+  const [mitre, setMitre] = useState({ tactics: [], total: 0, covered: 0, coveragePct: 0, totalDetections: 0 })
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
   const [editingRule, setEditingRule] = useState(null)
@@ -183,10 +183,17 @@ export default function Detection() {
     } catch {}
   }
 
-  useEffect(() => { loadRules(); loadLiveAlerts() }, [])
+  const loadMitre = async () => {
+    try {
+      const d = await api.getMitre()
+      setMitre(d)
+    } catch {}
+  }
+
+  useEffect(() => { loadRules(); loadLiveAlerts(); loadMitre() }, [])
 
   useEffect(() => {
-    const id = setInterval(loadLiveAlerts, 5000)
+    const id = setInterval(() => { loadLiveAlerts(); loadMitre() }, 5000)
     return () => clearInterval(id)
   }, [])
 
@@ -263,10 +270,10 @@ export default function Detection() {
     r.mitre?.toLowerCase().includes(filter.toLowerCase())
   )
 
-  const totalTechs = mitreAttackData.reduce((sum, t) => sum + t.techniques.length, 0)
-  const coveredTechs = mitreAttackData.reduce((sum, t) => sum + t.techniques.filter(tt => tt.covered).length, 0)
-  const coverage = Math.round((coveredTechs / totalTechs) * 100)
-  const totalDetections = mitreAttackData.reduce((sum, t) => sum + t.techniques.reduce((s, tt) => s + tt.detections, 0), 0)
+  const totalTechs = mitre.total
+  const coveredTechs = mitre.covered
+  const coverage = mitre.coveragePct
+  const totalDetections = mitre.totalDetections
 
   return (
     <div className="p-6 space-y-5">
@@ -534,7 +541,7 @@ export default function Detection() {
 
           {/* Tactic Accordion */}
           <div className="space-y-2">
-            {mitreAttackData.map((tactic) => {
+            {mitre.tactics.map((tactic) => {
               const isOpen = expandedTactic === tactic.id
               const tacticCoverage = Math.round((tactic.techniques.filter(t => t.covered).length / tactic.techniques.length) * 100)
               const color = tacticColors[tactic.tactic] || '#64748b'

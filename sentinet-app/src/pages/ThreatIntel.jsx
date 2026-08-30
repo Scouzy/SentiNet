@@ -15,7 +15,12 @@ const typeColors = { IP: '#3b82f6', Domain: '#8b5cf6', Hash: '#f59e0b', URL: '#e
 const MITRE_COLORS = ['#f97316', '#ec4899', '#8b5cf6', '#ef4444', '#3b82f6', '#06b6d4', '#10b981']
 
 function FeedCard({ feed }) {
-  const statusColor = feed.status === 'active' ? 'text-cyber-400 bg-cyber-500/10 border-cyber-500/25' : 'text-slate-400 bg-dark-700 border-dark-600'
+  const statusColor = feed.status === 'active'
+    ? 'text-cyber-400 bg-cyber-500/10 border-cyber-500/25'
+    : feed.status === 'error'
+      ? 'text-red-400 bg-red-500/10 border-red-500/25'
+      : 'text-slate-400 bg-dark-700 border-dark-600'
+  const statusLabel = feed.status === 'active' ? 'Actif' : feed.status === 'error' ? 'Erreur' : 'Inactif'
 
   return (
     <div className="card p-4">
@@ -25,7 +30,7 @@ function FeedCard({ feed }) {
           <span className="text-[10px] text-slate-500">{feed.type}</span>
         </div>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${statusColor}`}>
-          {feed.status === 'active' ? 'Actif' : 'Inactif'}
+          {statusLabel}
         </span>
       </div>
       <div className="grid grid-cols-3 gap-2 mb-3">
@@ -40,17 +45,19 @@ function FeedCard({ feed }) {
         <div className="text-center p-2 rounded-lg bg-dark-700/50">
           <p className="text-[10px] text-slate-500">Taux</p>
           <p className="text-xs font-bold font-mono text-cyber-400">
-            {((feed.matches / feed.iocs) * 100).toFixed(2)}%
+            {feed.iocs ? ((feed.matches / feed.iocs) * 100).toFixed(2) : '0.00'}%
           </p>
         </div>
       </div>
       <div className="flex items-center gap-1.5 text-[10px] text-slate-500 pt-2 border-t border-dark-600">
         <Clock className="w-3 h-3" />
-        <span>Mis à jour : {new Date(feed.lastUpdate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-        <button className="ml-auto flex items-center gap-1 text-cyber-400 hover:text-cyber-300">
-          <RefreshCw className="w-3 h-3" />
-          Sync
-        </button>
+        <span>{feed.lastUpdate ? `Mis à jour : ${new Date(feed.lastUpdate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}` : 'Local'}</span>
+        {feed.url && (
+          <a href={feed.url} target="_blank" rel="noreferrer" className="ml-auto flex items-center gap-1 text-cyber-400 hover:text-cyber-300">
+            <Globe className="w-3 h-3" />
+            Source
+          </a>
+        )}
       </div>
     </div>
   )
@@ -60,12 +67,15 @@ export default function ThreatIntel() {
   const [searchIoc, setSearchIoc] = useState('')
   const [filterType, setFilterType] = useState('all')
   const [alerts, setAlerts] = useState([])
+  const [feeds, setFeeds] = useState([])
+  const [totalIocs, setTotalIocs] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const load = () => api.getAlerts()
-      .then(d => { setAlerts(d.alerts || []); setLoading(false) })
-      .catch(() => setLoading(false))
+    const load = () => {
+      api.getAlerts().then(d => { setAlerts(d.alerts || []); setLoading(false) }).catch(() => setLoading(false))
+      api.getThreatFeeds().then(d => { setFeeds(d.feeds || []); setTotalIocs(d.totalIocs || 0) }).catch(() => {})
+    }
     load()
     const id = setInterval(load, 30000)
     return () => clearInterval(id)
@@ -108,10 +118,10 @@ export default function ThreatIntel() {
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Flux configurés', value: IOC_FEEDS_CONFIG.filter(f => f.status === 'active').length, icon: Database, color: 'text-cyber-400' },
+          { label: 'Flux actifs', value: feeds.filter(f => f.status === 'active').length, icon: Database, color: 'text-cyber-400' },
           { label: 'Alertes IoC / C2', value: iocAlerts.length, icon: ShieldAlert, color: 'text-red-400' },
           { label: 'IoCs uniques détectés', value: uniqueIocs.length, icon: AlertTriangle, color: 'text-orange-400' },
-          { label: 'Total alertes', value: alerts.length, icon: Globe, color: 'text-blue-400' },
+          { label: 'IoC en base (flux)', value: totalIocs.toLocaleString('fr-FR'), icon: Globe, color: 'text-blue-400' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="card p-5">
             <div className="flex items-start justify-between">
@@ -135,11 +145,9 @@ export default function ThreatIntel() {
           </button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          {IOC_FEEDS_CONFIG.map(feed => <FeedCard key={feed.name} feed={{
-            ...feed,
-            iocs: 0,
-            matches: 0,
-          }} />)}
+          {feeds.length === 0 ? (
+            <p className="text-xs text-slate-500 col-span-full py-4">Chargement des flux de renseignement…</p>
+          ) : feeds.map(feed => <FeedCard key={feed.name} feed={feed} />)}
         </div>
       </div>
 

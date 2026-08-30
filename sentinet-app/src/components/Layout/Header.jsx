@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Search, RefreshCw, Wifi, Clock, Menu } from 'lucide-react'
+import { Bell, Search, RefreshCw, Wifi, Clock, Menu, LogOut } from 'lucide-react'
+import { useAuth } from '../../context/AuthContext'
+import { api } from '../../services/api'
 
 export default function Header({ title, subtitle, onMenuToggle }) {
+  const { user, logout } = useAuth()
   const [time, setTime] = useState(new Date())
+  const [sensors, setSensors] = useState({ online: 0, total: 0 })
   const [isLive, setIsLive] = useState(true)
   const [searchVal, setSearchVal] = useState('')
   const searchRef = useRef(null)
@@ -12,6 +16,15 @@ export default function Header({ title, subtitle, onMenuToggle }) {
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const load = () => api.getSensors()
+      .then(d => setSensors({ online: d.online || 0, total: d.total || 0 }))
+      .catch(() => {})
+    load()
+    const id = setInterval(load, 10000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -107,8 +120,8 @@ export default function Header({ title, subtitle, onMenuToggle }) {
 
       {/* Network Status */}
       <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-dark-700 border border-dark-600">
-        <Wifi className="w-3.5 h-3.5 text-cyber-400" />
-        <span className="text-xs text-slate-400 font-mono">6/6 sondes</span>
+        <Wifi className={`w-3.5 h-3.5 ${sensors.online === sensors.total && sensors.total > 0 ? 'text-cyber-400' : 'text-yellow-400'}`} />
+        <span className="text-xs text-slate-400 font-mono">{sensors.online}/{sensors.total} sondes</span>
       </div>
 
       {/* Clock */}
@@ -122,6 +135,27 @@ export default function Header({ title, subtitle, onMenuToggle }) {
         <Bell className="w-4 h-4" />
         <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 border border-dark-850" />
       </button>
+
+      {/* Utilisateur connecté + déconnexion */}
+      {user && (
+        <div className="flex items-center gap-2 pl-2 ml-1 border-l border-dark-600">
+          <div className="hidden md:block text-right leading-tight">
+            <div className="text-xs font-medium text-slate-200 truncate max-w-[140px]">{user.name}</div>
+            <div className="text-[10px] text-slate-500 truncate max-w-[140px]">{user.role}</div>
+          </div>
+          <div className="w-8 h-8 rounded-full bg-cyber-500/15 border border-cyber-500/30 flex items-center justify-center text-[11px] font-semibold text-cyber-300">
+            {(user.name || '?').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}
+          </div>
+          <button
+            onClick={logout}
+            title="Se déconnecter"
+            aria-label="Se déconnecter"
+            className="p-2 rounded-lg hover:bg-dark-700 text-slate-400 hover:text-red-300 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </header>
   )
 }

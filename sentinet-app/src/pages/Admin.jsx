@@ -4,7 +4,6 @@ import {
   AlertTriangle, Key, Lock, RefreshCw, Plus, Edit, Trash2,
   Activity, Database, HardDrive, Cpu, Loader2, Smartphone, Copy, ShieldCheck, ShieldOff
 } from 'lucide-react'
-import { users as usersInit } from '../data/mockData'
 import { api } from '../services/api'
 import { useToast } from '../components/UI/Toast'
 
@@ -277,7 +276,7 @@ function UserModal({ user, onSave, onClose }) {
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState('users')
-  const [users, setUsers] = useState(usersInit)
+  const [users, setUsers] = useState([])
   const [editingUser, setEditingUser] = useState(null)
   const [showNewUser, setShowNewUser] = useState(false)
   const [loadingMfa, setLoadingMfa] = useState(false)
