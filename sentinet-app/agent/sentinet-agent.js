@@ -71,13 +71,23 @@ function startTcpdump() {
   console.log(`[agent] capture tcpdump sur ${IFACE} (fenêtre ${WINDOW / 1000}s)`)
   const td = spawn('tcpdump', ['-nn', '-q', '-l', '-i', IFACE, 'ip', 'and', '(tcp', 'or', 'udp)'], { stdio: ['ignore', 'pipe', 'pipe'] })
   let buf = ''
+  let errBuf = ''
   td.stdout.on('data', d => {
     buf += d.toString()
     const lines = buf.split('\n'); buf = lines.pop()
     for (const l of lines) onLine(l)
   })
-  td.stderr.on('data', d => { const s = d.toString(); if (/permission|denied|not found/i.test(s)) console.error('[agent] tcpdump:', s.trim()) })
-  td.on('exit', (code) => { console.error(`[agent] tcpdump arrêté (code ${code}) — nouvelle tentative dans 5s`); setTimeout(startTcpdump, 5000) })
+  td.stderr.on('data', d => { errBuf += d.toString() })
+  td.on('error', (e) => console.error('[agent] tcpdump introuvable ?', e.message))
+  td.on('exit', (code) => {
+    if (code !== 0) {
+      const msg = errBuf.trim().split('\n').filter(Boolean).slice(-2).join(' | ')
+      if (msg) console.error(`[agent] tcpdump: ${msg}`)
+      if (/no such device|SIOCGIFINDEX/i.test(errBuf)) console.error(`[agent] → l'interface « ${IFACE} » n'existe pas. Liste : ip -o link show`)
+    }
+    console.error(`[agent] tcpdump arrêté (code ${code}) — nouvelle tentative dans 5s`)
+    setTimeout(startTcpdump, 5000)
+  })
 }
 
 // Repli : snapshot des connexions via ss (socket-level, pas de vrai sniffing)

@@ -116,7 +116,7 @@ export const api = {
   getAuditStats: () => get('/audit/stats'),
 
   // Real network data
-  getTrafficHistory: () => get('/network/traffic-history'),
+  getTrafficHistory: (period) => get('/network/traffic-history' + (period && period !== 'live' ? `?period=${period}` : '')),
   getProtocols: () => get('/network/protocols'),
   getTopTalkers: () => get('/network/top-talkers'),
   getProtoStats: () => get('/network/per-proto-stats'),

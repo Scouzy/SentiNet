@@ -17,6 +17,7 @@ const whitelist = require('./services/whitelist')
 const platform = require('./services/platform')
 const auth = require('./services/auth')
 const threatintel = require('./services/threatintel')
+const history = require('./services/history')
 const mitreTaxonomy = require('./data/mitre.json')
 const bpfFilters = require('./data/bpf-filters.json')
 const retentionConfig = require('./config/retention.json')
@@ -776,7 +777,11 @@ function parseTopTalkers(parsedConns) {
 
 let lastParsedConns = []
 
-app.get('/api/network/traffic-history', (_req, res) => res.json({ history: trafficRing }))
+app.get('/api/network/traffic-history', (req, res) => {
+  const period = req.query.period
+  if (!period || period === 'live') return res.json({ history: trafficRing, period: 'live' })
+  res.json({ history: history.query(period), period })
+})
 
 app.get('/api/network/protocols', (_req, res) => {
   res.json({ protocols: parseProtocols(lastParsedConns) })
@@ -961,3 +966,23 @@ server.listen(PORT, HOST, () => {
   } catch (e) { console.warn('[TI] chargement initial:', e.message) }
 })()
 setInterval(() => { threatintel.refresh(detection).catch(() => {}) }, 6 * 3600 * 1000)
+
+// ── Échantillonnage de l'historique de trafic (1 point / 60 s) ────────────────
+let histPrevAdapters = null, histPrevTs = 0
+async function sampleTrafficHistory() {
+  try {
+    const adapters = await fetchAdapterStats()
+    if (!adapters) return
+    if (histPrevAdapters) {
+      const dt = (Date.now() - histPrevTs) / 1000
+      const { inMbps, outMbps } = calcThroughput(adapters, histPrevAdapters, dt)
+      const conns = lastParsedConns.length
+      const threats = db.dynamicAlerts.filter(a => Date.now() - new Date(a.timestamp).getTime() < 60000).length
+      history.record({ inMbps, outMbps, conns, threats })
+    }
+    histPrevAdapters = adapters
+    histPrevTs = Date.now()
+  } catch (e) { console.warn('[HIST] échantillon:', e.message) }
+}
+setInterval(sampleTrafficHistory, 60000)
+sampleTrafficHistory() // amorce la mesure (premier point réel au passage suivant)

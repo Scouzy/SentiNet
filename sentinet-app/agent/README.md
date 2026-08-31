@@ -15,10 +15,17 @@ domaine / réseau (page **Sondes & Agents**).
 ## Installation
 
 ```bash
-# Sur la machine à superviser
-sudo apt install -y nodejs tcpdump          # si nécessaire
-mkdir -p /opt/sentinet-agent && cd /opt/sentinet-agent
-# copier sentinet-agent.js dans ce dossier (scp, git, etc.)
+# Sur la machine à superviser : dépendances
+sudo apt update && sudo apt install -y nodejs tcpdump
+
+# Copier l'agent — d'abord dans le home (accessible sans root), puis déplacer en root.
+# (une copie scp directe vers /opt échoue avec « Permission denied » si l'utilisateur n'est pas root)
+#   depuis le serveur SentiNet :
+#     scp agent/sentinet-agent.js  user@MACHINE_CIBLE:~/
+sudo mkdir -p /opt/sentinet-agent
+sudo mv ~/sentinet-agent.js /opt/sentinet-agent/
+
+ip -o link show    # repérer l'interface à écouter (eth0, ens3…)
 ```
 
 ## Configuration & lancement

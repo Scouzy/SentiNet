@@ -47,8 +47,8 @@ export default function Sensors() {
   const steps = [
     { key: 'prereq', label: 'Prérequis sur la machine à superviser (Linux, accès root)',
       cmd: 'sudo apt update && sudo apt install -y nodejs tcpdump\nsudo mkdir -p /opt/sentinet-agent' },
-    { key: 'copy', label: 'Copier l\'agent sur cette machine (depuis le serveur SentiNet)',
-      cmd: 'scp agent/sentinet-agent.js  user@MACHINE_CIBLE:/opt/sentinet-agent/\n# puis repérer l\'interface réseau à écouter :\nip -o link show' },
+    { key: 'copy', label: 'Copier l\'agent (dans le home, puis déplacer en root — évite les erreurs de permission)',
+      cmd: '# depuis le serveur SentiNet, vers le dossier personnel de la cible :\nscp agent/sentinet-agent.js  user@MACHINE_CIBLE:~/\n# puis, sur la machine cible :\nsudo mkdir -p /opt/sentinet-agent && sudo mv ~/sentinet-agent.js /opt/sentinet-agent/\nip -o link show   # repérer l\'interface à écouter' },
     { key: 'run', label: 'Lancer l\'agent (adapter clé, domaine, réseau, sous-réseau, interface)',
       cmd: `sudo SENTINET_URL=${origin} \\\n  AGENT_KEY=<votre_clef_partagée> \\\n  AGENT_DOMAIN=devantiq.com \\\n  AGENT_NETWORK="LAN Siège" \\\n  AGENT_SUBNET=10.0.0.0/24 \\\n  IFACE=eth0 \\\n  node /opt/sentinet-agent/sentinet-agent.js` },
   ]
@@ -94,7 +94,14 @@ export default function Sensors() {
                     <div className="flex items-center gap-2">
                       {s.kind === 'agent' ? <Radar className="w-4 h-4 text-cyber-400" /> : <Server className="w-4 h-4 text-blue-400" />}
                       <div>
-                        <h3 className="text-xs font-semibold text-white">{s.host} <span className="text-slate-500 font-normal">· {s.segment}</span></h3>
+                        <h3 className="text-xs font-semibold text-white flex items-center gap-1.5 flex-wrap">
+                          {s.host} <span className="text-slate-500 font-normal">· {s.segment}</span>
+                          {s.domain && s.domain !== '—' && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-normal text-cyber-300 bg-cyber-500/10 border border-cyber-500/25 rounded px-1.5 py-0.5">
+                              <Globe className="w-2.5 h-2.5" />{s.domain}
+                            </span>
+                          )}
+                        </h3>
                         <p className="text-[10px] text-slate-500 font-mono">
                           {s.kind === 'agent' ? 'Agent' : 'Sonde locale'}{s.subnet ? ` · ${s.subnet}` : ''}{s.iface ? ` · ${s.iface}` : ''}
                         </p>

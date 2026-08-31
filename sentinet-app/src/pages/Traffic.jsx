@@ -37,8 +37,26 @@ function KpiCard({ label, value, unit, icon: Icon, colorClass, bgClass, live }) 
   )
 }
 
+const PERIODS = [
+  { key: 'live', label: 'Temps réel' },
+  { key: '24h', label: '24 h' },
+  { key: '7d', label: '7 j' },
+  { key: '30d', label: '30 j' },
+  { key: '180d', label: '6 mois' },
+  { key: '365d', label: '1 an' },
+]
+function fmtLabel(t, period) {
+  const d = new Date(t)
+  if (period === '24h') return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  if (period === '7d') return d.toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+  if (period === '30d') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
 export default function Traffic() {
   const { metrics, trafficHistory, connected } = useWebSocket()
+  const [period, setPeriod] = useState('live')
+  const [histData, setHistData] = useState([])
   const [protoStats, setProtoStats]   = useState([])
   const [topTalkers, setTopTalkers]   = useState([])
   const [connections, setConnections] = useState([])
@@ -62,6 +80,19 @@ export default function Traffic() {
     const id = setInterval(load, 5000)
     return () => clearInterval(id)
   }, [])
+
+  // Historique par période (24 h / 7 j / 30 j / 6 mois / 1 an)
+  useEffect(() => {
+    if (period === 'live') return
+    const load = () => api.getTrafficHistory(period)
+      .then(d => setHistData((d.history || []).map(p => ({ ...p, time: fmtLabel(p.t, period) }))))
+      .catch(() => {})
+    load()
+    const id = setInterval(load, 30000)
+    return () => clearInterval(id)
+  }, [period])
+
+  const chartData = period === 'live' ? trafficHistory : histData
 
   const inMbps   = +(metrics?.net?.inMbps  ?? 0).toFixed(3)
   const outMbps  = +(metrics?.net?.outMbps ?? 0).toFixed(3)
@@ -124,24 +155,47 @@ export default function Traffic() {
 
         {/* Area Chart */}
         <div className="card p-5 xl:col-span-2">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-start justify-between mb-3 gap-3 flex-wrap">
             <div>
-              <h2 className="text-sm font-semibold text-white">Trafic entrant / sortant — Temps réel</h2>
+              <h2 className="text-sm font-semibold text-white">
+                Trafic entrant / sortant — {PERIODS.find(p => p.key === period)?.label}
+              </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                {trafficHistory.length} points · fenêtre ≈ {Math.round(trafficHistory.length * 3 / 60)} min
+                {period === 'live'
+                  ? `${trafficHistory.length} points · fenêtre ≈ ${Math.round(trafficHistory.length * 3 / 60)} min`
+                  : `${chartData.length} point(s) agrégé(s) · moyenne par intervalle`}
               </p>
             </div>
             <div className="flex items-center gap-4 text-[10px] text-slate-500">
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-0.5 rounded bg-cyber-400" /> Entrant
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-0.5 rounded bg-blue-400" /> Sortant
-              </div>
+              <div className="flex items-center gap-1.5"><div className="w-3 h-0.5 rounded bg-cyber-400" /> Entrant</div>
+              <div className="flex items-center gap-1.5"><div className="w-3 h-0.5 rounded bg-blue-400" /> Sortant</div>
             </div>
           </div>
+
+          {/* Sélecteur de période */}
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {PERIODS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
+                  period === p.key
+                    ? 'bg-cyber-500/20 text-cyber-300 border-cyber-500/40'
+                    : 'bg-dark-700 text-slate-400 border-dark-600 hover:text-slate-200'
+                }`}
+              >{p.label}</button>
+            ))}
+          </div>
+
+          {period !== 'live' && chartData.length === 0 ? (
+            <div className="h-[230px] flex flex-col items-center justify-center text-xs text-slate-500 text-center px-6 gap-1">
+              <Activity className="w-5 h-5 text-slate-600 mb-1" />
+              <span>Historique « {PERIODS.find(p => p.key === period)?.label} » en cours de constitution.</span>
+              <span className="text-slate-600">Un point est enregistré chaque minute — reviens un peu plus tard.</span>
+            </div>
+          ) : (
           <ResponsiveContainer width="100%" height={230}>
-            <AreaChart data={trafficHistory} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="gIn" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#00c98d" stopOpacity={0.3} />
@@ -163,6 +217,7 @@ export default function Traffic() {
               <Area type="monotone" dataKey="out" stroke="#3b82f6" strokeWidth={2} fill="url(#gOut)" dot={false} activeDot={{ r: 3 }} />
             </AreaChart>
           </ResponsiveContainer>
+          )}
         </div>
 
         {/* Protocol Distribution */}
