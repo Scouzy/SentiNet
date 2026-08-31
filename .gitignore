@@ -24,6 +24,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# État runtime du serveur (généré/écrit en continu — ne pas versionner,
+# sinon chaque `git pull` entre en conflit). Recréé au démarrage.
+sentinet-app/server/data/db.json
+
 # Captures réseau
 *.pcap
 *.pcapng
