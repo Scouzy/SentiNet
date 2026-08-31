@@ -149,6 +149,7 @@ function AlertDetail({ alert, onClose, onStatusChange }) {
                 { label: 'Protocole', value: alert.protocol, icon: ArrowRight },
                 { label: 'Segment', value: alert.segment, icon: Shield },
                 { label: 'Sonde', value: alert.probe, icon: Eye },
+                { label: 'Domaine', value: alert.domain || '—', icon: Globe },
               ].map(({ label, value, icon: Icon }) => (
                 <div key={label} className="p-3 rounded-lg bg-dark-700/50 border border-dark-600">
                   <div className="flex items-center gap-1.5 mb-1">
@@ -228,10 +229,15 @@ export default function Alerts() {
   }, [searchParams, setSearchParams])
   const [filterSeverity, setFilterSeverity] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterDomain, setFilterDomain] = useState('all')
+  const [filterSegment, setFilterSegment] = useState('all')
   const [selectedAlert, setSelectedAlert] = useState(null)
 
   useEffect(() => {
-    api.getAlerts().then(d => d.alerts && setAlerts(d.alerts)).catch(() => {})
+    const load = () => api.getAlerts().then(d => d.alerts && setAlerts(d.alerts)).catch(() => {})
+    load()
+    const id = setInterval(load, 5000)
+    return () => clearInterval(id)
   }, [])
 
   const handleStatusChange = useCallback((id, status) => {
@@ -239,16 +245,24 @@ export default function Alerts() {
     setSelectedAlert(prev => prev?.id === id ? { ...prev, status } : prev)
   }, [])
 
+  const domains = ['all', ...Array.from(new Set(alerts.map(a => a.domain).filter(d => d && d !== '—')))]
+  const segments = ['all', ...Array.from(new Set(alerts.map(a => a.segment).filter(Boolean)))]
+
   const filtered = alerts
     .filter(a => {
       if (filterSeverity !== 'all' && a.severity !== filterSeverity) return false
       if (filterStatus !== 'all' && a.status !== filterStatus) return false
+      if (filterDomain !== 'all' && a.domain !== filterDomain) return false
+      if (filterSegment !== 'all' && a.segment !== filterSegment) return false
       if (search) {
         const q = search.toLowerCase()
         return a.type.toLowerCase().includes(q) ||
           a.description.toLowerCase().includes(q) ||
           a.source.includes(q) ||
           a.destination.includes(q) ||
+          (a.segment || '').toLowerCase().includes(q) ||
+          (a.probe || '').toLowerCase().includes(q) ||
+          (a.domain || '').toLowerCase().includes(q) ||
           a.id.toLowerCase().includes(q)
       }
       return true
@@ -318,7 +332,27 @@ export default function Alerts() {
               {s === 'all' ? 'Toutes' : s.charAt(0).toUpperCase() + s.slice(1)}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {domains.length > 1 && (
+              <select
+                value={filterDomain}
+                onChange={e => setFilterDomain(e.target.value)}
+                title="Filtrer par domaine"
+                className="px-2.5 py-1 rounded-lg bg-dark-700 border border-dark-600 text-xs text-slate-300 outline-none"
+              >
+                {domains.map(d => <option key={d} value={d}>{d === 'all' ? 'Tous domaines' : d}</option>)}
+              </select>
+            )}
+            {segments.length > 1 && (
+              <select
+                value={filterSegment}
+                onChange={e => setFilterSegment(e.target.value)}
+                title="Filtrer par segment / sonde"
+                className="px-2.5 py-1 rounded-lg bg-dark-700 border border-dark-600 text-xs text-slate-300 outline-none"
+              >
+                {segments.map(s => <option key={s} value={s}>{s === 'all' ? 'Tous segments' : s}</option>)}
+              </select>
+            )}
             <span className="text-xs text-slate-500 hidden sm:inline">Statut :</span>
             <select
               value={filterStatus}
@@ -377,6 +411,7 @@ export default function Alerts() {
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Sévérité</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Type</th>
                 <th className="hidden lg:table-cell px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Source → Destination</th>
+                <th className="hidden xl:table-cell px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Sonde / Segment</th>
                 <th className="hidden xl:table-cell px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Proto</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Score</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Statut</th>
@@ -406,6 +441,14 @@ export default function Alerts() {
                       <span className="text-slate-300 truncate max-w-[110px]">{alert.source}</span>
                       <ArrowRight className="w-3 h-3 text-slate-600 flex-shrink-0" />
                       <span className="text-slate-400 truncate max-w-[110px]">{alert.destination}</span>
+                    </div>
+                  </td>
+                  <td className="hidden xl:table-cell px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-mono text-cyber-400 truncate max-w-[140px]">{alert.probe || 'LOCAL'}</span>
+                      <span className="text-[10px] text-slate-500 truncate max-w-[140px]">
+                        {alert.segment || '—'}{alert.domain && alert.domain !== '—' ? ` · ${alert.domain}` : ''}
+                      </span>
                     </div>
                   </td>
                   <td className="hidden xl:table-cell px-4 py-3">

@@ -4,13 +4,25 @@ import { Bell, Search, RefreshCw, Wifi, Clock, Menu, LogOut } from 'lucide-react
 import { useAuth } from '../../context/AuthContext'
 import { api } from '../../services/api'
 
+const SEV = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' }
+const timeAgo = (ts) => {
+  const diff = Math.round((Date.now() - new Date(ts).getTime()) / 1000)
+  if (diff < 60) return `${diff}s`
+  if (diff < 3600) return `${Math.floor(diff / 60)}min`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
+  return `${Math.floor(diff / 86400)}j`
+}
+
 export default function Header({ title, subtitle, onMenuToggle }) {
   const { user, logout } = useAuth()
   const [time, setTime] = useState(new Date())
   const [sensors, setSensors] = useState({ online: 0, total: 0 })
   const [isLive, setIsLive] = useState(true)
   const [searchVal, setSearchVal] = useState('')
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifs, setNotifs] = useState([])
   const searchRef = useRef(null)
+  const notifRef = useRef(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -25,6 +37,21 @@ export default function Header({ title, subtitle, onMenuToggle }) {
     load()
     const id = setInterval(load, 10000)
     return () => clearInterval(id)
+  }, [])
+
+  // Notifications : dernières alertes
+  useEffect(() => {
+    const load = () => api.getAlerts().then(d => setNotifs((d.alerts || []).slice(0, 8))).catch(() => {})
+    load()
+    const id = setInterval(load, 10000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Fermeture du panneau au clic extérieur
+  useEffect(() => {
+    const onClick = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
   useEffect(() => {
@@ -131,10 +158,52 @@ export default function Header({ title, subtitle, onMenuToggle }) {
       </div>
 
       {/* Notifications */}
-      <button className="relative p-2 rounded-lg hover:bg-dark-700 text-slate-400 hover:text-slate-200 transition-colors">
-        <Bell className="w-4 h-4" />
-        <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 border border-dark-850" />
-      </button>
+      <div className="relative" ref={notifRef}>
+        <button
+          onClick={() => setNotifOpen(o => !o)}
+          aria-label="Notifications"
+          className="relative p-2 rounded-lg hover:bg-dark-700 text-slate-400 hover:text-slate-200 transition-colors"
+        >
+          <Bell className="w-4 h-4" />
+          {notifs.some(a => a.status === 'open') && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 border border-dark-850" />
+          )}
+        </button>
+        {notifOpen && (
+          <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-xl border border-dark-600 bg-dark-800 shadow-xl z-50">
+            <div className="px-4 py-2.5 border-b border-dark-600 flex items-center justify-between sticky top-0 bg-dark-800">
+              <span className="text-xs font-semibold text-white">Notifications</span>
+              <span className="text-[10px] text-slate-500">{notifs.length} récente(s)</span>
+            </div>
+            {notifs.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-slate-500">Aucune alerte récente</div>
+            ) : (
+              <div className="divide-y divide-dark-600/50">
+                {notifs.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => { setNotifOpen(false); navigate('/alerts') }}
+                    className="w-full text-left px-4 py-2.5 hover:bg-dark-750 transition-colors flex items-start gap-2"
+                  >
+                    <span className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: SEV[a.severity] || '#475569' }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-slate-200 truncate">{a.type}</p>
+                      <p className="text-[10px] text-slate-500 truncate font-mono">{a.source} · {a.segment || 'LOCAL'}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-600 flex-shrink-0">{timeAgo(a.timestamp)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => { setNotifOpen(false); navigate('/alerts') }}
+              className="w-full px-4 py-2.5 text-xs text-cyber-400 hover:text-cyber-300 hover:bg-dark-750 border-t border-dark-600 transition-colors sticky bottom-0 bg-dark-800"
+            >
+              Voir toutes les alertes →
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Utilisateur connecté + déconnexion */}
       {user && (

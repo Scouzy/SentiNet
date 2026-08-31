@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Alerts from './pages/Alerts'
 import Network from './pages/Network'
+import Sensors from './pages/Sensors'
 import Traffic from './pages/Traffic'
 import Detection from './pages/Detection'
 import Response from './pages/Response'
@@ -20,6 +21,7 @@ const routes = [
   { path: '/', element: <Dashboard />, title: 'Dashboard', subtitle: 'Vue d\'ensemble temps réel' },
   { path: '/alerts', element: <Alerts />, title: 'Alertes & Incidents', subtitle: 'Gestion et investigation des alertes' },
   { path: '/network', element: <Network />, title: 'Supervision réseau', subtitle: 'Observabilité et métriques de trafic' },
+  { path: '/sensors', element: <Sensors />, title: 'Sondes & Agents', subtitle: 'Capteurs distribués par domaine et réseau' },
   { path: '/traffic', element: <Traffic />, title: 'Traffic Monitor', subtitle: 'Trafic entrant / sortant par protocole — temps réel' },
   { path: '/detection', element: <Detection />, title: 'Détection & Menaces', subtitle: 'Règles, anomalies et couverture MITRE ATT&CK' },
   { path: '/response', element: <Response />, title: 'Réponse & Remédiation', subtitle: 'Playbooks SOAR et actions de confinement' },

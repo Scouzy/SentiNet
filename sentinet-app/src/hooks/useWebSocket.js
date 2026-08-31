@@ -43,7 +43,7 @@ export function useWebSocket() {
                 in: +(d.net?.inMbps ?? 0).toFixed(3),
                 out: +(d.net?.outMbps ?? 0).toFixed(3),
                 conns: d.conns ?? 0,
-                threats: d.alerts?.critical ?? 0,
+                threats: d.threats ?? d.alerts?.critical ?? 0,
               }
               ringRef.current = [...ringRef.current, point].slice(-RING_SIZE)
               setTrafficHistory([...ringRef.current])

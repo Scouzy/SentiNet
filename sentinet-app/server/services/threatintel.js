@@ -54,11 +54,13 @@ async function fetchFeed(feed) {
 // Rafraîchit tous les flux et pousse les IP vers le moteur de détection
 async function refresh(detection) {
   await Promise.all(FEEDS.map(fetchFeed))
-  if (detection && detection.KNOWN_BAD_IPS) {
+  if (detection) {
+    // Flux publics → IoC de réputation (sévérité moyenne)
     for (const entry of state.values()) {
-      for (const ip of entry.ips) detection.KNOWN_BAD_IPS.add(ip)
+      for (const ip of entry.ips) detection.addFeedIoC?.(ip)
     }
-    for (const ip of customIocs) detection.KNOWN_BAD_IPS.add(ip)
+    // IoC internes ajoutés par un analyste → confirmés (sévérité critique)
+    for (const ip of customIocs) detection.addIoC?.(ip)
   }
   return getSummary()
 }

@@ -34,6 +34,10 @@ function canFire(key, cooldownMs = 120000) {
   return true
 }
 
+// Contexte d'analyse courant (mono-hôte local vs agent distant)
+let _ctx = {}            // { probe, segment, domain } injecté dans chaque alerte
+let _excludeLocal = true // false pour le trafic observé par un agent (pas d'auto-exclusion)
+
 function makeAlert(fields) {
   return {
     id: `DYN-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
@@ -49,6 +53,7 @@ function makeAlert(fields) {
     riskScore: 50,
     probe: 'LOCAL',
     segment: 'LOCAL',
+    ..._ctx,
     ...fields,
   }
 }
@@ -89,7 +94,7 @@ function checkBeaconing(connections) {
     if (c.state !== 'ESTABLISHED') continue
     const src = srcOf(c), dst = dstOf(c)
     if (isEmpty(dst) || isPrivate(dst) || dst === src) continue
-    if (localIPs.has(src) || isPrivate(src)) continue // exclure machine locale + IP privées
+    if (_excludeLocal && (localIPs.has(src) || isPrivate(src))) continue // exclure machine locale + IP privées (trafic local uniquement)
     const key = `${src}→${dst}`
     const ts = beaconTs.get(key) || []
     ts.push(now)
@@ -127,7 +132,7 @@ function checkLateral(connections) {
   for (const c of connections) {
     if (c.state !== 'ESTABLISHED') continue
     const src = srcOf(c), dst = dstOf(c)
-    if (localIPs.has(src)) continue // la machine SentiNet elle-même ne génère pas de faux positifs
+    if (_excludeLocal && localIPs.has(src)) continue // la machine SentiNet elle-même ne génère pas de faux positifs
     const port = portOf(c)
     if (!isPrivate(dst) || isEmpty(dst) || !LATERAL_PORTS.has(port)) continue
     const hosts = srcMap.get(src) || new Set()
@@ -162,7 +167,7 @@ function checkPortScan(connections) {
     if (c.proto !== 'TCP') continue
     const src = srcOf(c), dst = dstOf(c), port = portOf(c)
     if (!port || isEmpty(dst)) continue
-    if (localIPs.has(src) || isPrivate(src)) continue // exclure machine locale + IP privées
+    if (_excludeLocal && (localIPs.has(src) || isPrivate(src))) continue // exclure machine locale + IP privées (trafic local uniquement)
     if (isEmpty(dst) || dst === '::1' || dst === '127.0.0.1') continue // exclure loopback dst
     const key = `${src}→${dst}`
     const ports = pairPorts.get(key) || new Set()
@@ -186,11 +191,14 @@ function checkPortScan(connections) {
 }
 
 // ── IoC matching ──────────────────────────────────────────────────────────────
+// IoC curés (C2/backdoor confirmés) — haute confiance → alerte CRITIQUE
 const KNOWN_BAD_IPS = new Set([
   '185.234.219.44', '91.134.178.201', '103.21.244.18',
   '45.33.32.156', '198.51.100.99', '192.0.2.100',
   '5.188.86.172', '194.165.16.158',
 ])
+// IoC issus des flux publics de réputation (bruités) — confiance moindre → alerte MOYENNE
+const FEED_BAD_IPS = new Set()
 const C2_PORTS = new Set([4444, 1337, 31337, 8888, 9001, 6667, 6697])
 
 function checkIoC(connections) {
@@ -198,12 +206,23 @@ function checkIoC(connections) {
   for (const c of connections) {
     const dst = dstOf(c), port = portOf(c)
     if (KNOWN_BAD_IPS.has(dst)) {
+      // IoC curé / ajouté par un analyste → critique
       const a = emit(`ioc:ip:${dst}`, makeAlert({
-        type: 'IoC — IP malveillante',
+        type: 'IoC — IP malveillante (confirmée)',
         severity: 'critical',
-        description: `Connexion vers IP répertoriée dans les flux de threat intelligence : ${dst}`,
+        description: `Connexion vers une IP répertoriée comme C2/malveillante confirmée : ${dst}`,
         source: srcOf(c), destination: dst, protocol: c.proto,
         mitre: 'T1071', riskScore: 91,
+      }), 600000)
+      if (a) alerts.push(a)
+    } else if (FEED_BAD_IPS.has(dst)) {
+      // Correspondance avec un flux public de réputation → confiance moindre → moyen
+      const a = emit(`ioc:feed:${dst}`, makeAlert({
+        type: 'IoC — réputation (flux public)',
+        severity: 'medium',
+        description: `Connexion vers une IP présente dans un flux public de threat intelligence : ${dst}`,
+        source: srcOf(c), destination: dst, protocol: c.proto,
+        mitre: 'T1071', riskScore: 55,
       }), 600000)
       if (a) alerts.push(a)
     }
@@ -297,7 +316,11 @@ function trackSessions(connections) {
 function getSessionCount() { return sessionStore.size }
 
 // ── Main analysis entry point ─────────────────────────────────────────────────
-function analyze(connections, inMbps = 0) {
+function analyze(connections, inMbps = 0, opts = {}) {
+  // opts.excludeLocal=false pour le trafic OBSERVÉ par un agent (sonde distante) ;
+  // opts.tag = { probe, segment, domain } injecté dans chaque alerte émise.
+  _ctx = opts.tag || {}
+  _excludeLocal = opts.excludeLocal !== false
   const results = []
   try { results.push(...checkBeaconing(connections)) } catch {}
   try { results.push(...checkLateral(connections)) } catch {}
@@ -305,6 +328,7 @@ function analyze(connections, inMbps = 0) {
   try { results.push(...checkIoC(connections)) } catch {}
   try { results.push(...checkSignatures(connections)) } catch {}
   try { const v = checkVolumeAnomaly(inMbps); if (v) results.push(v) } catch {}
+  _ctx = {}; _excludeLocal = true
   return results
 }
 
@@ -347,5 +371,8 @@ module.exports = {
     if (rules.length === before) throw new Error(`Règle ${id} introuvable`)
   },
   KNOWN_BAD_IPS,
-  addIoC(ip) { KNOWN_BAD_IPS.add(ip) },
+  FEED_BAD_IPS,
+  addIoC(ip) { KNOWN_BAD_IPS.add(ip) },              // IoC curé → critique
+  addFeedIoC(ip) { FEED_BAD_IPS.add(ip) },           // IoC flux public → moyen
+  isMalicious(ip) { return KNOWN_BAD_IPS.has(ip) || FEED_BAD_IPS.has(ip) },
 }

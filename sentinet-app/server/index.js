@@ -78,7 +78,10 @@ wss.on('error', (err) => {
 })
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }))
-app.use(express.json())
+app.use(express.json({ limit: '4mb' })) // marge pour les lots de connexions remontés par les agents
+
+// Clé partagée pour l'authentification des agents distants (sondes)
+const AGENT_KEY = process.env.AGENT_KEY || ''
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
@@ -166,7 +169,10 @@ const agents = new Map() // agentId -> { id, host, segment, load, connections, i
 function agentSensors() {
   const now = Date.now()
   return [...agents.values()].map(a => ({
-    id: a.id, host: a.host, segment: a.segment || `Agent ${a.host}`, mode: 'IDS',
+    id: a.id, host: a.host,
+    segment: a.network || a.segment || `Agent ${a.host}`,
+    domain: a.domain || '—', subnet: a.subnet || '', iface: a.iface || '',
+    mode: 'IDS',
     status: (now - (a.lastSeenTs || 0) < 30000) ? 'online' : 'offline',
     load: a.load || 0, connections: a.connections || 0, interfaces: a.interfaces || 0,
     droppedPct: 0, version: a.version || '3.2', kind: 'agent', lastSeen: a.lastSeen,
@@ -257,7 +263,8 @@ app.post('/api/auth/logout', (_req, res) => res.json({ ok: true })) // jeton san
 
 // ═══ Garde d'authentification : toutes les autres routes /api sont protégées ═══
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth')) return next()
+  // /auth = login public ; /agent = authentifié par clé d'agent (X-Agent-Key)
+  if (req.path.startsWith('/auth') || req.path.startsWith('/agent')) return next()
   auth.requireAuth(req, res, next)
 })
 
@@ -600,7 +607,7 @@ app.post('/api/threat-intel/ioc', (req, res) => {
 
 app.get('/api/threat-intel/check/:ip', (req, res) => {
   const ip = req.params.ip
-  res.json({ ip, malicious: detection.KNOWN_BAD_IPS.has(ip) })
+  res.json({ ip, malicious: detection.isMalicious(ip) })
 })
 
 // ── Vrais flux de threat intelligence (EF-801/802) ────────────────────────────
@@ -679,6 +686,42 @@ app.get('/api/sensors', (_req, res) => {
   }
   const sensors = [local, ...agentSensors()]
   res.json({ sensors, online: sensors.filter(s => s.status === 'online').length, total: sensors.length })
+})
+
+// ── Ingestion des agents distants (sondes est-ouest) — auth par clé d'agent ────
+app.post('/api/agent/ingest', (req, res) => {
+  if (!AGENT_KEY || req.headers['x-agent-key'] !== AGENT_KEY) {
+    return res.status(401).json({ error: 'Agent non autorisé' })
+  }
+  const b = req.body || {}
+  const agentId = String(b.agentId || '').trim()
+  if (!agentId) return res.status(400).json({ error: 'agentId requis' })
+  const connections = Array.isArray(b.connections) ? b.connections : []
+  const isNew = !agents.has(agentId)
+  agents.set(agentId, {
+    id: agentId,
+    host: b.host || agentId,
+    domain: b.domain || '—',
+    network: b.network || '—',
+    subnet: b.subnet || '',
+    iface: b.iface || '',
+    load: Number(b.cpu) || 0,
+    connections: connections.length,
+    interfaces: Number(b.interfaces) || 0,
+    version: b.version || '3.2',
+    lastSeen: new Date().toISOString(),
+    lastSeenTs: Date.now(),
+  })
+  if (isNew) audit.write('AGENT_REGISTER', agentId, b.host || agentId, { domain: b.domain, network: b.network })
+  // Analyse du trafic OBSERVÉ par l'agent (sans auto-exclusion locale)
+  try {
+    detection.analyze(connections, Number(b.throughputMbps) || 0, {
+      excludeLocal: false,
+      tag: { probe: agentId, segment: b.network || 'AGENT', domain: b.domain || '—' },
+    })
+    detection.trackSessions(connections)
+  } catch (e) { console.warn('[AGENT] analyse:', e.message) }
+  res.json({ ok: true, received: connections.length })
 })
 
 // ── Données réelles : trafic, protocoles, top-talkers, tendances alertes ────────
@@ -881,6 +924,7 @@ wss.on('connection', (ws, req) => {
               sessions: detection.getSessionCount(),
               net: { inMbps, outMbps },
               alerts: { total: db.alerts.length, critical: db.alerts.filter(a => a.severity === 'critical' && a.status === 'open').length },
+              threats, // menaces détectées sur les 30 dernières secondes (pour la courbe)
               ts: Date.now(),
             }
           }))

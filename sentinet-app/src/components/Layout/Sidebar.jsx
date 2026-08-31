@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { api } from '../../services/api'
+import { useAuth } from '../../context/AuthContext'
 import {
   LayoutDashboard, ShieldAlert, Network, Radar, Zap,
-  Globe, FileBarChart, Settings, ChevronRight, Activity, BarChart2
+  Globe, FileBarChart, Settings, ChevronRight, Activity, BarChart2, Server
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -11,6 +12,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
   { to: '/alerts', icon: ShieldAlert, label: 'Alertes & Incidents' },
   { to: '/network', icon: Network, label: 'Supervision réseau' },
+  { to: '/sensors', icon: Server, label: 'Sondes & Agents' },
   { to: '/traffic', icon: BarChart2, label: 'Traffic Monitor' },
   { to: '/detection', icon: Radar, label: 'Détection & Menaces' },
   { to: '/response', icon: Zap, label: 'Réponse & Remédiation' },
@@ -21,13 +23,10 @@ const navItems = [
 
 export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }) {
   const location = useLocation()
-  const [currentUser, setCurrentUser] = useState(null)
+  const { user: currentUser } = useAuth() // utilisateur réellement connecté
   const [sysInfo, setSysInfo] = useState(null)
 
   useEffect(() => {
-    api.getUsers()
-      .then(d => { if (d.users?.length) setCurrentUser(d.users[0]) })
-      .catch(() => {})
     const loadSys = () => api.getSystemInfo().then(setSysInfo).catch(() => {})
     loadSys()
     const id = setInterval(loadSys, 15000)

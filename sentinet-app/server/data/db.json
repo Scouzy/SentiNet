@@ -1,1 +1,16 @@
-{"alerts":[],"blocks":[],"users":[]}
+{
+  "alerts": [],
+  "blocks": [],
+  "users": [
+    {
+      "id": 1788161831817,
+      "name": "Admin",
+      "email": "hello@devantiq.com",
+      "role": "Admin Plateforme",
+      "status": "active",
+      "mfa": false,
+      "lastLogin": "2026-08-31T07:39:21.287Z",
+      "passwordHash": "scrypt$656db87194fc8e2938d9ef6f7f6f0319$4794c9ed122d6137efe344050b57ca45c712815d1dea230546814257a1ff6d6cf6bf6ac0276532b73ab7181c5d295264896bad781b585e859affe3b232b5790c"
+    }
+  ]
+}

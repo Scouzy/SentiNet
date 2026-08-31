@@ -40,8 +40,13 @@ L'interface web offre à l'analyste SOC un tableau de bord temps réel, la carto
 - **Balayage de ports** : ≥ 25 ports TCP distincts depuis une même source.
 - **Anomalie volumétrique** : détection des pics de débit (> 800 Mbps).
 - **Signatures** : moteur de règles configurables (`signatures.json`) avec éditeur intégré (CRUD complet).
-- **Threat intelligence** : IoC (IPs/ports malveillants connus), enrichissement des alertes, cartographie **MITRE ATT&CK**.
+- **Threat intelligence** : ingestion de **vrais flux publics** (Feodo Tracker, SSLBL d'abuse.ch, Blocklist.de), enrichissement des alertes, cartographie **MITRE ATT&CK** calculée sur les alertes réelles.
 - **Scoring de risque** statistique sur chaque alerte.
+
+### 🛰️ Sondes distribuées (agents est-ouest)
+- **Agents-sondes** déployables sur d'autres machines : capture du trafic du segment (`tcpdump`, repli `ss`), remontée sécurisée (clé d'agent partagée) au serveur central.
+- Détection **est-ouest** (balayage, mouvement latéral, beaconing) sur le trafic **observé**, avec attribution **par domaine, réseau et sonde**.
+- Console **Sondes & Agents** : supervision des capteurs et gestion des intrusions par domaine / segment.
 
 ### 🛡️ Réponse & orchestration
 - **Blocage temps réel** via `netsh advfirewall` (Windows), bidirectionnel.
@@ -52,7 +57,8 @@ L'interface web offre à l'analyste SOC un tableau de bord temps réel, la carto
 ### 📜 Audit & conformité
 - **Piste d'audit inaltérable** (EF-904) : chaînage SHA-256 (`hash = SHA256(entry + prevHash)`), stockage append-only, vérification d'intégrité complète.
 - **Rétention & RGPD** : politiques de rétention paramétrables, pseudonymisation (SHA-256 + sel) des données personnelles.
-- **RBAC + MFA** : gestion des utilisateurs, rôles et authentification forte (`otplib` / QR code).
+- **Authentification** : connexion e-mail + mot de passe (**hachage scrypt**), **MFA TOTP** (QR code), sessions signées (HS256) ; **toutes** les routes API et le WebSocket sont protégés.
+- **RBAC** : gestion des utilisateurs, rôles et privilèges (moindre privilège).
 
 ### 📊 Interface analyste (SPA React)
 Tableau de bord temps réel · Cartographie réseau · Détection & règles · Alertes · Trafic · Threat Intel · Réponse · Rapports & KPI (MTTD/MTTR/faux positifs) · Administration.
@@ -144,20 +150,29 @@ SentiNet/
     ├── vite.config.js
     ├── tailwind.config.js
     ├── package.json
+    ├── ecosystem.config.cjs        # Config PM2 (prod)
+    ├── .env.example                # Modèle de configuration
     ├── public/                     # Logos, icônes, favicon, manifest PWA
     ├── logs/                       # Piste d'audit runtime (audit.log — non versionné)
+    ├── agent/                      # Agent-sonde distant (sniffing + remontée)
+    │   ├── sentinet-agent.js
+    │   └── README.md
+    ├── test/                       # Kit de test d'intrusion (validation Phase 4)
+    │   ├── intrusion-test.sh
+    │   └── INTRUSION-TEST.md
     ├── server/                     # Backend
-    │   ├── index.js                # API REST + serveur WebSocket
-    │   ├── services/               # detection.js · audit.js · whitelist.js
+    │   ├── index.js                # API REST + WebSocket + ingestion agents
+    │   ├── services/               # detection · platform · auth · threatintel · audit · whitelist
+    │   ├── scripts/                # create-admin.js
     │   ├── config/                 # retention.json
-    │   └── data/                   # signatures, whitelist, bpf-filters, db
+    │   └── data/                   # signatures, whitelist, bpf-filters, mitre, playbooks, db
     └── src/                        # Frontend React
-        ├── pages/                  # Dashboard, Detection, Alerts, Network,
-        │                           #   Traffic, ThreatIntel, Response, Reports, Admin
+        ├── pages/                  # Dashboard, Alerts, Network, Sensors, Traffic,
+        │                           #   Detection, Response, ThreatIntel, Reports, Admin, Login
+        ├── context/                # AuthContext
         ├── components/             # Layout (Header, Sidebar) + UI
         ├── hooks/                  # useWebSocket
-        ├── services/               # api.js
-        └── data/                   # mockData.js
+        └── services/               # api.js
 ```
 
 ---
@@ -202,17 +217,24 @@ Un guide complet de mise en production (Ubuntu/Debian, **nginx + PM2 + HTTPS Let
 # En résumé, sur le VPS :
 git clone https://github.com/Scouzy/SentiNet.git /var/www/sentinet
 cd /var/www/sentinet/sentinet-app
-cp .env.example .env          # renseigner PORT / CORS_ORIGIN
+cp .env.example .env          # renseigner CORS_ORIGIN, générer AGENT_KEY (openssl rand -hex 24)
 npm install && npm run build
+# Créer le premier compte admin (mot de passe via $ADMIN_PASSWORD)
+ADMIN_PASSWORD=... node server/scripts/create-admin.js "admin@exemple.fr" "Nom" "Admin Plateforme"
 pm2 start ecosystem.config.cjs && pm2 save
 # puis configurer nginx + certbot (voir DEPLOYMENT.md)
 ```
+
+Déploiement d'une **sonde** sur une autre machine : voir **[`agent/README.md`](agent/README.md)**.
+Validation par **test d'intrusion** : voir **[`test/INTRUSION-TEST.md`](test/INTRUSION-TEST.md)**.
 
 ---
 
 ## Documentation
 
 - **[`DEPLOYMENT.md`](DEPLOYMENT.md)** — guide de déploiement VPS (nginx, PM2, HTTPS).
+- **[`agent/README.md`](agent/README.md)** — déploiement d'un agent-sonde distant.
+- **[`test/INTRUSION-TEST.md`](test/INTRUSION-TEST.md)** — test d'intrusion de validation.
 - **[`ARCHITECTURE.md`](ARCHITECTURE.md)** — architecture technique, flux de données, sécurité, conformité, performances.
 - **[`Cahier_des_charges_SentiNet.md`](Cahier_des_charges_SentiNet.md)** — cahier des charges détaillé (exigences EF/ENF).
 - **[`Todolist_SentiNet.md`](Todolist_SentiNet.md)** — suivi d'avancement par phase.

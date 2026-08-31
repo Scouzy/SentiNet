@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  AreaChart, Area, BarChart, Bar, ComposedChart, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
 import {
@@ -92,20 +92,23 @@ export default function Dashboard() {
   const [protocols, setProtocols] = useState([])
   const [topTalkers, setTopTalkers] = useState([])
   const [ifaceCount, setIfaceCount] = useState(null)
+  const [sensors, setSensors] = useState({ online: 0, total: 0, list: [] })
 
   const loadData = async () => {
-    const [alertsRes, statsRes, trendsRes, protsRes, talkersRes] = await Promise.allSettled([
+    const [alertsRes, statsRes, trendsRes, protsRes, talkersRes, sensorsRes] = await Promise.allSettled([
       api.getAlerts(),
       api.getAlertStats(),
       api.getAlertTrends(),
       api.getProtocols(),
       api.getTopTalkers(),
+      api.getSensors(),
     ])
     if (alertsRes.status === 'fulfilled') setRecentAlerts(alertsRes.value.alerts?.slice(0, 5) || [])
     if (statsRes.status === 'fulfilled') setAlertStats(statsRes.value)
     if (trendsRes.status === 'fulfilled') setAlertTrends(trendsRes.value.trends || [])
     if (protsRes.status === 'fulfilled') setProtocols(protsRes.value.protocols || [])
     if (talkersRes.status === 'fulfilled') setTopTalkers(talkersRes.value.talkers || [])
+    if (sensorsRes.status === 'fulfilled') setSensors({ online: sensorsRes.value.online || 0, total: sensorsRes.value.total || 0, list: sensorsRes.value.sensors || [] })
   }
 
   useEffect(() => {
@@ -126,6 +129,9 @@ export default function Dashboard() {
   const blockedCount = alertStats.bySeverity ? (alertStats.total - alertStats.open) : 0
   const highCount = alertStats.bySeverity?.find(s => s.severity === 'high')?.count || 0
   const criticalCount = alertStats.bySeverity?.find(s => s.severity === 'critical')?.count || 0
+  const mediumCount = alertStats.bySeverity?.find(s => s.severity === 'medium')?.count || 0
+  // Nombre réel de critiques OUVERTES (métriques temps réel ; repli sur le total critique)
+  const openCritical = metrics?.alerts?.critical ?? criticalCount
 
   const lastAlertAgo = (() => {
     if (!recentAlerts.length) return 'Aucune'
@@ -138,12 +144,12 @@ export default function Dashboard() {
   return (
     <div className="p-6 space-y-6">
       {/* Critical Banner */}
-      {criticalAlerts.length > 0 && (
+      {openCritical > 0 && (
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30">
           <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
           <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
           <span className="text-sm text-red-300 font-medium">
-            {criticalAlerts.length} alertes critiques actives — Intervention immédiate requise
+            {openCritical} alerte{openCritical > 1 ? 's' : ''} critique{openCritical > 1 ? 's' : ''} active{openCritical > 1 ? 's' : ''} — Intervention immédiate requise
           </span>
           <button onClick={() => navigate('/alerts')} className="ml-auto text-xs text-red-400 hover:text-red-300 font-medium underline underline-offset-2">
             Voir les alertes →
@@ -169,11 +175,11 @@ export default function Dashboard() {
           color="cyber"
         />
         <MetricCard
-          title="Alertes élevées"
-          value={highCount}
-          sub={`${criticalCount} critique(s) · ${alertStats.open || 0} ouvertes`}
+          title="Priorité haute"
+          value={criticalCount + highCount}
+          sub={`${criticalCount} critique(s) · ${highCount} élevée(s) · ${mediumCount} moyenne(s)`}
           icon={Zap}
-          color={highCount > 0 ? 'orange' : 'blue'}
+          color={criticalCount > 0 ? 'red' : highCount > 0 ? 'orange' : 'blue'}
           alert={criticalCount > 0}
         />
         <MetricCard
@@ -198,7 +204,7 @@ export default function Dashboard() {
         <MetricCard
           title="Connexions actives"
           value={metrics ? metrics.conns.toLocaleString('fr-FR') : '—'}
-          sub="netstat TCP+UDP"
+          sub="Sessions TCP/UDP"
           icon={Server}
           color="blue"
         />
@@ -211,11 +217,11 @@ export default function Dashboard() {
           color={metrics?.cpu > 80 ? 'red' : 'cyber'}
         />
         <MetricCard
-          title="Interfaces réseau"
-          value={ifaceCount ?? '—'}
-          sub={ifaceCount !== null ? `Interface${ifaceCount > 1 ? 's' : ''} active${ifaceCount > 1 ? 's' : ''} détectée${ifaceCount > 1 ? 's' : ''}` : 'Chargement…'}
+          title="Sondes actives"
+          value={sensors.total ? `${sensors.online}/${sensors.total}` : '—'}
+          sub={`${ifaceCount ?? '—'} interface(s) · ${new Set(sensors.list.map(s => s.domain).filter(d => d && d !== '—')).size} domaine(s)`}
           icon={Wifi}
-          color="cyber"
+          color={sensors.total > 0 && sensors.online === sensors.total ? 'cyber' : 'orange'}
         />
       </div>
 
@@ -244,7 +250,7 @@ export default function Dashboard() {
             </div>
           </div>
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={trafficHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <ComposedChart data={trafficHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorIn" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#00c98d" stopOpacity={0.3} />
@@ -257,12 +263,14 @@ export default function Dashboard() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2d4e" />
               <XAxis dataKey="time" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} interval={3} />
-              <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+              {/* Axe gauche : débit (Mbps) — Axe droit : menaces (nombre) */}
+              <YAxis yAxisId="left" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis yAxisId="right" orientation="right" allowDecimals={false} tick={{ fill: '#ef4444', fontSize: 10 }} tickLine={false} axisLine={false} width={28} />
               <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="in" name="Entrant" stroke="#00c98d" fill="url(#colorIn)" strokeWidth={2} dot={false} />
-              <Area type="monotone" dataKey="out" name="Sortant" stroke="#3b82f6" fill="url(#colorOut)" strokeWidth={1.5} dot={false} />
-              <Bar dataKey="threats" name="Menaces" fill="#ef444460" radius={[2, 2, 0, 0]} />
-            </AreaChart>
+              <Area yAxisId="left" type="monotone" dataKey="in" name="Entrant" stroke="#00c98d" fill="url(#colorIn)" strokeWidth={2} dot={false} />
+              <Area yAxisId="left" type="monotone" dataKey="out" name="Sortant" stroke="#3b82f6" fill="url(#colorOut)" strokeWidth={1.5} dot={false} />
+              <Bar yAxisId="right" dataKey="threats" name="Menaces" fill="#ef444488" radius={[2, 2, 0, 0]} maxBarSize={10} />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 

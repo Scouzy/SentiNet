@@ -164,4 +164,32 @@ Réseau →  Capture (netstat/TAP)  →  Detection Engine
 
 ---
 
-*Dernière mise à jour : juillet 2024 — SentiNet v3.2*
+## 10. Authentification & contrôle d'accès (EF-901/903)
+
+- **Connexion** e-mail + mot de passe, avec **MFA TOTP** (RFC 6238) en 2ᵉ facteur (`server/services/auth.js`).
+- **Hachage des mots de passe** : `scrypt` (module `crypto` natif, sel aléatoire par compte, comparaison à temps constant).
+- **Sessions** : jeton signé **HS256** (JWT-like) avec `SESSION_SECRET`, expiration 8 h ; jeton MFA intermédiaire à courte durée (5 min).
+- **Protection** : middleware `requireAuth` sur **toutes** les routes `/api` (sauf `/api/auth/*` et `/api/agent/*`), et vérification du jeton à l'ouverture du **WebSocket** (`?token=`).
+- **RBAC** : rôle porté par le jeton, contrôle `requireRole` ; masquage systématique des secrets (`passwordHash`, `mfaSecret`) dans les réponses API.
+- **Amorçage** : script `server/scripts/create-admin.js` (mot de passe via `$ADMIN_PASSWORD`, jamais en argument).
+
+## 11. Sondes distribuées (agents est-ouest) — EF-905
+
+```
+┌─────────────────┐   HTTPS + X-Agent-Key    ┌──────────────────────────┐
+│  Agent-sonde    │ ───────────────────────► │  /api/agent/ingest        │
+│  (2ᵉ machine)   │   flux agrégés (5s)       │  → detection.analyze(     │
+│  tcpdump → flux │                           │      excludeLocal:false,  │
+│  domaine/réseau │                           │      tag:{sonde,segment,  │
+└─────────────────┘                           │          domaine})        │
+                                              └──────────────────────────┘
+```
+
+- L'**agent** (`agent/sentinet-agent.js`, Node sans dépendance) capture le trafic de son interface via `tcpdump` (repli `ss`), agrège les flux sur une fenêtre glissante et les remonte au serveur, avec son **domaine**, son **réseau/segment** et son **sous-réseau**.
+- **Authentification** par clé partagée `AGENT_KEY` (en-tête `X-Agent-Key`).
+- Le serveur exécute le **moteur de détection sur le trafic observé** — sans l'auto-exclusion locale — ce qui permet la détection **est-ouest** (balayage, mouvement latéral, beaconing) depuis une source réelle. Chaque alerte est taguée **sonde / segment / domaine** et suit la chaîne complète (temps réel, audit, playbooks).
+- **Console** : page *Sondes & Agents* (supervision par domaine/réseau, gestion des intrusions par segment) ; registre des agents in-memory avec statut en ligne/hors ligne.
+
+---
+
+*Dernière mise à jour : août 2026 — SentiNet v3.2 (authentification, portage Linux, agents distribués)*
