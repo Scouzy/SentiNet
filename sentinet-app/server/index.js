@@ -82,6 +82,11 @@ app.use(express.json({ limit: '4mb' })) // marge pour les lots de connexions rem
 
 // Clé partagée pour l'authentification des agents distants (sondes)
 const AGENT_KEY = process.env.AGENT_KEY || ''
+
+// Domaine supervisé par la sonde locale (affiché dans « Sondes & Agents »)
+const SERVER_DOMAIN = process.env.SERVER_DOMAIN || (() => {
+  try { return new URL(process.env.CORS_ORIGIN || '').hostname || os.hostname() } catch { return os.hostname() }
+})()
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
@@ -673,6 +678,7 @@ app.get('/api/sensors', (_req, res) => {
   const local = {
     id: 'SENSOR-LOCAL',
     host: os.hostname(),
+    domain: SERVER_DOMAIN,
     segment: 'Hôte local (auto-surveillance)',
     mode: 'IDS',
     status: 'online',

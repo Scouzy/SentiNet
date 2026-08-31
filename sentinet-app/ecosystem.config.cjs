@@ -20,6 +20,8 @@ module.exports = {
         PORT: 3010,
         // Origine autorisée pour CORS — doit correspondre à l'URL publique
         CORS_ORIGIN: 'https://sentinet.devantiq.com',
+        // Domaine supervisé par la sonde locale (affiché dans « Sondes & Agents »)
+        SERVER_DOMAIN: 'devantiq.com',
         // Blocage iptables réel : 'false' = mode sûr (n'altère pas le pare-feu de l'hôte).
         // Mettre 'true' seulement si tu veux que SentiNet applique les blocages au niveau OS.
         FIREWALL_ENFORCE: 'false',

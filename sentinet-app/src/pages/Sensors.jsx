@@ -11,7 +11,7 @@ export default function Sensors() {
   const [alerts, setAlerts] = useState([])
   const [loading, setLoading] = useState(true)
   const [blockingIp, setBlockingIp] = useState(null)
-  const [copied, setCopied] = useState(false)
+  const [copiedKey, setCopiedKey] = useState('')
 
   useEffect(() => {
     const load = () => {
@@ -43,13 +43,18 @@ export default function Sensors() {
   const domains = Object.keys(byDomain).filter(d => d !== '—').length || (sensors.length ? 1 : 0)
   const eastWest = alerts.filter(a => a.probe && a.probe !== 'LOCAL' && a.probe !== 'SENSOR-LOCAL').length
 
-  const deployCmd = `sudo SENTINET_URL=${typeof window !== 'undefined' ? window.location.origin : 'https://sentinet.devantiq.com'} \\
-  AGENT_KEY=<votre_clef> AGENT_DOMAIN=devantiq.com \\
-  AGENT_NETWORK="LAN Siège" AGENT_SUBNET=10.0.0.0/24 IFACE=eth0 \\
-  node sentinet-agent.js`
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://sentinet.devantiq.com'
+  const steps = [
+    { key: 'prereq', label: 'Prérequis sur la machine à superviser (Linux, accès root)',
+      cmd: 'sudo apt update && sudo apt install -y nodejs tcpdump\nsudo mkdir -p /opt/sentinet-agent' },
+    { key: 'copy', label: 'Copier l\'agent sur cette machine (depuis le serveur SentiNet)',
+      cmd: 'scp agent/sentinet-agent.js  user@MACHINE_CIBLE:/opt/sentinet-agent/\n# puis repérer l\'interface réseau à écouter :\nip -o link show' },
+    { key: 'run', label: 'Lancer l\'agent (adapter clé, domaine, réseau, sous-réseau, interface)',
+      cmd: `sudo SENTINET_URL=${origin} \\\n  AGENT_KEY=<votre_clef_partagée> \\\n  AGENT_DOMAIN=devantiq.com \\\n  AGENT_NETWORK="LAN Siège" \\\n  AGENT_SUBNET=10.0.0.0/24 \\\n  IFACE=eth0 \\\n  node /opt/sentinet-agent/sentinet-agent.js` },
+  ]
 
-  const copyCmd = () => {
-    try { navigator.clipboard.writeText(deployCmd); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch {}
+  const copy = (text, key) => {
+    try { navigator.clipboard.writeText(text); setCopiedKey(key); setTimeout(() => setCopiedKey(''), 1500) } catch {}
   }
 
   return (
@@ -132,22 +137,43 @@ export default function Sensors() {
         </div>
       ))}
 
-      {/* Déployer un agent */}
+      {/* Déployer un agent — procédure pas-à-pas */}
       <div className="card p-5">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-1">
           <Radar className="w-4 h-4 text-cyber-400" />
           <h2 className="text-sm font-semibold text-white">Déployer une nouvelle sonde (agent)</h2>
         </div>
-        <p className="text-xs text-slate-500 mb-3">
-          Copiez <span className="font-mono text-slate-300">agent/sentinet-agent.js</span> sur la machine à superviser (Linux, tcpdump + root),
-          puis lancez la commande ci-dessous en remplaçant la clé, le domaine, le réseau et l'interface. L'agent sniffe le trafic du segment et remonte les intrusions ici.
+        <p className="text-xs text-slate-500 mb-4">
+          Un agent capture le trafic du segment où il est installé et remonte les intrusions ici, sous son domaine.
+          La <span className="text-slate-300 font-medium">clé d'agent</span> doit être identique à <span className="font-mono text-slate-300">AGENT_KEY</span> du serveur.
         </p>
-        <div className="relative">
-          <pre className="text-[11px] font-mono text-slate-300 bg-dark-900 border border-dark-600 rounded-lg p-3 overflow-x-auto whitespace-pre">{deployCmd}</pre>
-          <button onClick={copyCmd} className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-dark-700 border border-dark-600 text-[10px] text-slate-400 hover:text-cyber-400">
-            {copied ? <CheckCircle className="w-3 h-3 text-cyber-400" /> : <Copy className="w-3 h-3" />}{copied ? 'Copié' : 'Copier'}
-          </button>
-        </div>
+
+        <ol className="space-y-4">
+          {steps.map((s, i) => (
+            <li key={s.key} className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyber-500/15 border border-cyber-500/30 flex items-center justify-center text-[11px] font-bold text-cyber-300">{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-slate-300 mb-1.5">{s.label}</p>
+                <div className="relative">
+                  <pre className="text-[11px] font-mono text-slate-300 bg-dark-900 border border-dark-600 rounded-lg p-3 pr-16 overflow-x-auto whitespace-pre">{s.cmd}</pre>
+                  <button onClick={() => copy(s.cmd, s.key)} className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-dark-700 border border-dark-600 text-[10px] text-slate-400 hover:text-cyber-400">
+                    {copiedKey === s.key ? <CheckCircle className="w-3 h-3 text-cyber-400" /> : <Copy className="w-3 h-3" />}{copiedKey === s.key ? 'Copié' : 'Copier'}
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+          <li className="flex gap-3">
+            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-cyber-500/15 border border-cyber-500/30 flex items-center justify-center text-[11px] font-bold text-cyber-300">4</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-slate-300">Faire tourner l'agent en permanence (redémarrage auto)</p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Service <span className="font-mono text-slate-400">systemd</span> prêt à copier dans <span className="font-mono text-slate-400">agent/README.md</span> (section « Exécution permanente »).
+                Vérifie ensuite l'agent dans cette page : il apparaît en ligne sous son domaine.
+              </p>
+            </div>
+          </li>
+        </ol>
       </div>
     </div>
   )
