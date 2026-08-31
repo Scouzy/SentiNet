@@ -174,7 +174,8 @@ let lastMetrics = { cpu: 0, mem: 0, conns: 0 }
 const agents = new Map() // agentId -> { id, host, segment, load, connections, interfaces, version, lastSeen, lastSeenTs }
 function agentSensors() {
   const now = Date.now()
-  return [...agents.values()].map(a => ({
+  // Purge les sondes injoignables depuis > 1 h (évite les entrées fantômes)
+  return [...agents.values()].filter(a => now - (a.lastSeenTs || 0) < 3600000).map(a => ({
     id: a.id, host: a.host,
     segment: a.network || a.segment || `Agent ${a.host}`,
     domain: a.domain || '—', subnet: a.subnet || '', iface: a.iface || '',
@@ -729,6 +730,13 @@ app.post('/api/agent/ingest', (req, res) => {
     detection.trackSessions(connections)
   } catch (e) { console.warn('[AGENT] analyse:', e.message) }
   res.json({ ok: true, received: connections.length })
+})
+
+// ── Téléchargement de l'agent (facilite le déploiement de nouvelles sondes) ────
+app.get('/api/agent/download', (_req, res) => {
+  res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="sentinet-agent.js"')
+  res.sendFile(path.join(__dirname, '..', 'agent', 'sentinet-agent.js'))
 })
 
 // ── Données réelles : trafic, protocoles, top-talkers, tendances alertes ────────

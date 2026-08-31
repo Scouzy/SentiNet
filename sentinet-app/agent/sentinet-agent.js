@@ -31,7 +31,22 @@ const os = require('os')
 
 const URL_BASE = (process.env.SENTINET_URL || '').replace(/\/$/, '')
 const AGENT_KEY = process.env.AGENT_KEY || ''
-const AGENT_ID = process.env.AGENT_ID || os.hostname()
+// Identifiant unique de l'agent. Par défaut : hostname + suffixe stable dérivé
+// de la 1re adresse MAC — évite les collisions entre VPS partageant un même
+// hostname (ex. « my-vps ») qui écraseraient sinon la même sonde côté serveur.
+function defaultAgentId() {
+  const host = os.hostname()
+  let mac = ''
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const i of ifaces) {
+      if (i && !i.internal && i.mac && i.mac !== '00:00:00:00:00:00') { mac = i.mac; break }
+    }
+    if (mac) break
+  }
+  const suffix = mac ? mac.replace(/:/g, '').slice(-4) : Math.random().toString(36).slice(2, 6)
+  return `${host}-${suffix}`
+}
+const AGENT_ID = process.env.AGENT_ID || defaultAgentId()
 const DOMAIN = process.env.AGENT_DOMAIN || '—'
 const NETWORK = process.env.AGENT_NETWORK || 'Segment agent'
 const SUBNET = process.env.AGENT_SUBNET || ''

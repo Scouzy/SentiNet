@@ -47,8 +47,8 @@ export default function Sensors() {
   const steps = [
     { key: 'prereq', label: 'Prérequis sur la machine à superviser (Linux, accès root)',
       cmd: 'sudo apt update && sudo apt install -y nodejs tcpdump\nsudo mkdir -p /opt/sentinet-agent' },
-    { key: 'copy', label: 'Copier l\'agent (dans le home, puis déplacer en root — évite les erreurs de permission)',
-      cmd: '# depuis le serveur SentiNet, vers le dossier personnel de la cible :\nscp agent/sentinet-agent.js  user@MACHINE_CIBLE:~/\n# puis, sur la machine cible :\nsudo mkdir -p /opt/sentinet-agent && sudo mv ~/sentinet-agent.js /opt/sentinet-agent/\nip -o link show   # repérer l\'interface à écouter' },
+    { key: 'copy', label: 'Télécharger l\'agent sur la machine cible (aucun scp — via le serveur)',
+      cmd: `mkdir -p /opt/sentinet-agent\ncurl -fsSL ${origin}/api/agent/download -o /opt/sentinet-agent/sentinet-agent.js\nip -o link show   # repérer l'interface à écouter` },
     { key: 'run', label: 'Lancer l\'agent (adapter clé, domaine, réseau, sous-réseau, interface)',
       cmd: `sudo SENTINET_URL=${origin} \\\n  AGENT_KEY=<votre_clef_partagée> \\\n  AGENT_DOMAIN=devantiq.com \\\n  AGENT_NETWORK="LAN Siège" \\\n  AGENT_SUBNET=10.0.0.0/24 \\\n  IFACE=eth0 \\\n  node /opt/sentinet-agent/sentinet-agent.js` },
   ]

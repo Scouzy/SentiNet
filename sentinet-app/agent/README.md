@@ -18,12 +18,10 @@ domaine / réseau (page **Sondes & Agents**).
 # Sur la machine à superviser : dépendances
 sudo apt update && sudo apt install -y nodejs tcpdump
 
-# Copier l'agent — d'abord dans le home (accessible sans root), puis déplacer en root.
-# (une copie scp directe vers /opt échoue avec « Permission denied » si l'utilisateur n'est pas root)
-#   depuis le serveur SentiNet :
-#     scp agent/sentinet-agent.js  user@MACHINE_CIBLE:~/
+# Récupérer l'agent — le plus simple : téléchargement direct depuis le serveur SentiNet
 sudo mkdir -p /opt/sentinet-agent
-sudo mv ~/sentinet-agent.js /opt/sentinet-agent/
+sudo curl -fsSL https://sentinet.devantiq.com/api/agent/download -o /opt/sentinet-agent/sentinet-agent.js
+#   Alternative (scp) : scp agent/sentinet-agent.js user@CIBLE:~/  puis  sudo mv ~/sentinet-agent.js /opt/sentinet-agent/
 
 ip -o link show    # repérer l'interface à écouter (eth0, ens3…)
 ```
@@ -47,7 +45,7 @@ sudo SENTINET_URL=https://sentinet.devantiq.com \
 |---|---|---|
 | `SENTINET_URL` | URL du serveur central | *(requis)* |
 | `AGENT_KEY` | clé partagée d'authentification | *(requis)* |
-| `AGENT_ID` | identifiant unique de l'agent | hostname |
+| `AGENT_ID` | identifiant **unique** de l'agent (différent sur chaque machine) | hostname + suffixe MAC |
 | `AGENT_DOMAIN` | domaine supervisé | `—` |
 | `AGENT_NETWORK` | libellé du segment réseau | `Segment agent` |
 | `AGENT_SUBNET` | sous-réseau surveillé | *(vide)* |
