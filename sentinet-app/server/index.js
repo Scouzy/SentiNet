@@ -739,6 +739,13 @@ app.get('/api/agent/download', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'agent', 'sentinet-agent.js'))
 })
 
+// Script d'installation systemd (agent en arrière-plan) — récupérable via curl
+app.get('/api/agent/install', (_req, res) => {
+  res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8')
+  res.setHeader('Content-Disposition', 'attachment; filename="install-agent.sh"')
+  res.sendFile(path.join(__dirname, '..', 'agent', 'install-agent.sh'))
+})
+
 // ── Données réelles : trafic, protocoles, top-talkers, tendances alertes ────────
 const PORT_PROTO = {
   80: 'HTTP', 8080: 'HTTP-alt', 443: 'HTTPS', 8443: 'HTTPS-alt',

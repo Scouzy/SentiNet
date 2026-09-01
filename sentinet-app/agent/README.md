@@ -52,13 +52,48 @@ sudo SENTINET_URL=https://sentinet.devantiq.com \
 | `IFACE` | interface de capture | `any` |
 | `WINDOW` | fenêtre d'agrégation (s) | `5` |
 
-## Exécution permanente (systemd)
+## Exécution en arrière-plan (recommandé) — installation en une commande
+
+Lancer l'agent avec `node sentinet-agent.js` dans un terminal le **tue dès que la
+console est fermée**. Pour qu'il tourne en tâche de fond (et redémarre tout seul au
+reboot du VPS), installe-le en **service systemd** via le script fourni :
+
+```bash
+# Sur la machine à superviser, en root :
+curl -fsSL https://sentinet.devantiq.com/api/agent/install -o install-agent.sh
+sudo SENTINET_URL=https://sentinet.devantiq.com \
+     AGENT_KEY=<votre_clef_partagée> \
+     AGENT_DOMAIN=devantiq.com \
+     AGENT_NETWORK="LAN Siège" \
+     AGENT_SUBNET=10.0.0.0/24 \
+     IFACE=ens6 \
+     bash install-agent.sh
+```
+
+Le script installe Node.js + tcpdump si besoin, télécharge l'agent, crée le service
+`sentinet-agent` et le démarre. **Tu peux fermer la console : l'agent continue.**
+Les variables non fournies sont demandées de façon interactive. Ré-exécuter le script
+reconfigure simplement le service (utile pour changer d'interface ou de domaine).
+
+Commandes utiles :
+
+```bash
+sudo journalctl -u sentinet-agent -f          # logs en direct
+sudo systemctl restart sentinet-agent         # redémarrer
+sudo systemctl stop sentinet-agent            # arrêter
+sudo systemctl disable --now sentinet-agent   # désactiver complètement
+```
+
+### Variante manuelle (unité systemd écrite à la main)
+
+Si tu préfères écrire l'unité toi-même :
 
 ```ini
 # /etc/systemd/system/sentinet-agent.service
 [Unit]
 Description=SentiNet Agent
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Environment=SENTINET_URL=https://sentinet.devantiq.com
@@ -69,6 +104,7 @@ Environment=AGENT_SUBNET=10.0.0.0/24
 Environment=IFACE=eth0
 ExecStart=/usr/bin/node /opt/sentinet-agent/sentinet-agent.js
 Restart=always
+RestartSec=5
 User=root
 
 [Install]
