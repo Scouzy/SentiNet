@@ -129,7 +129,7 @@ function saveDb() {
   clearTimeout(_saveTimer)
   _saveTimer = setTimeout(() => {
     try {
-      fs.writeFileSync(DB_PATH, JSON.stringify({ alerts: db.alerts.slice(0, 500), blocks: db.blocks, users: db.users }, null, 2))
+      fs.writeFileSync(DB_PATH, JSON.stringify({ alerts: db.alerts.slice(0, 10000), blocks: db.blocks, users: db.users }, null, 2))
     } catch (e) { console.warn('[DB] Erreur écriture db.json :', e.message) }
   }, 500)
 }
@@ -189,7 +189,7 @@ function agentSensors() {
 // ── EventBus — detection engine → alerts store ────────────────────────────────
 detection.bus.on('alert', (alert) => {
   db.alerts.unshift(alert)
-  if (db.alerts.length > 500) db.alerts.splice(500)
+  if (db.alerts.length > 10000) db.alerts.splice(10000)
   db.dynamicAlerts.unshift(alert)
   if (db.dynamicAlerts.length > 100) db.dynamicAlerts.splice(100)
   audit.write('DETECTION_ALERT', 'system', alert.source, { type: alert.type, severity: alert.severity, mitre: alert.mitre })

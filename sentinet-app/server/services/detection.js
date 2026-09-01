@@ -100,15 +100,16 @@ function checkBeaconing(connections) {
     ts.push(now)
     if (ts.length > 24) ts.splice(0, ts.length - 24)
     beaconTs.set(key, ts)
-    if (ts.length < 8) continue
+    if (ts.length < 12) continue
     const diffs = ts.slice(1).map((t, i) => t - ts[i])
     const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length
     const std = Math.sqrt(diffs.reduce((a, b) => a + (b - avg) ** 2, 0) / diffs.length)
     const cv = avg > 0 ? std / avg : 1
-    // avg > 25s : évite de confondre connexions TCP persistantes (intervalle polling = 5s)
-    // avg < 600s : plage réaliste pour du beaconing C2
-    // cv < 0.12 : très régulier (pas de jitter naturel)
-    if (cv < 0.12 && avg > 25000 && avg < 600000) {
+    // avg > 30s : évite de confondre connexions TCP persistantes / keep-alive légitimes
+    // avg < 300s : plage réaliste pour du beaconing C2 (au-delà = trop lent pour du C2 actif)
+    // cv < 0.08 : quasi-parfaitement régulier — le trafic humain/applicatif a du jitter naturel
+    // (min. 12 timestamps requis en amont → ≥ 11 intervalles observés, moins de faux positifs)
+    if (cv < 0.08 && avg > 30000 && avg < 300000) {
       const a = emit(`beacon:${key}`, makeAlert({
         type: 'Beaconing C2',
         severity: 'high',
@@ -197,8 +198,12 @@ const KNOWN_BAD_IPS = new Set([
   '45.33.32.156', '198.51.100.99', '192.0.2.100',
   '5.188.86.172', '194.165.16.158',
 ])
-// IoC issus des flux publics de réputation (bruités) — confiance moindre → alerte MOYENNE
+// IoC issus des flux publics de réputation (bruités) — confiance moindre.
+// Par défaut ILS N'ÉMETTENT PAS d'alerte (trop de faux positifs sur interface
+// publique) : ils servent d'enrichissement/contexte. Mettre IOC_FEED_ALERTS=true
+// pour réactiver les alertes de réputation.
 const FEED_BAD_IPS = new Set()
+const FEED_IOC_ALERTS = process.env.IOC_FEED_ALERTS === 'true'
 const C2_PORTS = new Set([4444, 1337, 31337, 8888, 9001, 6667, 6697])
 
 function checkIoC(connections) {
@@ -215,8 +220,9 @@ function checkIoC(connections) {
         mitre: 'T1071', riskScore: 91,
       }), 600000)
       if (a) alerts.push(a)
-    } else if (FEED_BAD_IPS.has(dst)) {
+    } else if (FEED_IOC_ALERTS && FEED_BAD_IPS.has(dst)) {
       // Correspondance avec un flux public de réputation → confiance moindre → moyen
+      // (désactivé par défaut : voir FEED_IOC_ALERTS)
       const a = emit(`ioc:feed:${dst}`, makeAlert({
         type: 'IoC — réputation (flux public)',
         severity: 'medium',
