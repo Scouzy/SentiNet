@@ -1,9 +1,60 @@
 import React, { useState, useEffect } from 'react'
-import { Server, Radar, Wifi, WifiOff, Globe, Network as NetIcon, ShieldAlert, Ban, Copy, CheckCircle, Loader2 } from 'lucide-react'
+import { Server, Radar, Wifi, WifiOff, Globe, Network as NetIcon, ShieldAlert, Ban, Copy, CheckCircle, Loader2, ChevronRight, ArrowLeft } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../components/UI/Toast'
 
 const SEV = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6' }
+
+// ── Carte d'une sonde (vue détaillée) ─────────────────────────────────────────
+function SensorCard({ s, alertsFor, onBlock, blockingIp }) {
+  const sa = alertsFor(s).slice(0, 5)
+  const online = s.status === 'online'
+  return (
+    <div className="card p-4">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-2">
+          {s.kind === 'agent' ? <Radar className="w-4 h-4 text-cyber-400" /> : <Server className="w-4 h-4 text-blue-400" />}
+          <div>
+            <h3 className="text-xs font-semibold text-white flex items-center gap-1.5 flex-wrap">
+              {s.host} <span className="text-slate-500 font-normal">· {s.segment}</span>
+            </h3>
+            <p className="text-[10px] text-slate-500 font-mono">
+              {s.kind === 'agent' ? 'Agent' : 'Sonde locale'}{s.subnet ? ` · ${s.subnet}` : ''}{s.iface ? ` · ${s.iface}` : ''}
+            </p>
+          </div>
+        </div>
+        <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border ${online ? 'text-cyber-400 bg-cyber-500/10 border-cyber-500/25' : 'text-slate-400 bg-dark-700 border-dark-600'}`}>
+          {online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}{online ? 'En ligne' : 'Hors ligne'}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-3 pt-2 border-t border-dark-600">
+        <div className="text-center"><p className="text-[10px] text-slate-500">Charge</p><p className="text-sm font-bold font-mono text-slate-200">{s.load}%</p></div>
+        <div className="text-center"><p className="text-[10px] text-slate-500">Flux</p><p className="text-sm font-bold font-mono text-slate-200">{s.connections}</p></div>
+        <div className="text-center"><p className="text-[10px] text-slate-500">Alertes</p><p className={`text-sm font-bold font-mono ${sa.length ? 'text-red-400' : 'text-slate-200'}`}>{alertsFor(s).length}</p></div>
+      </div>
+      {sa.length > 0 ? (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Intrusions récentes</p>
+          {sa.map((a, i) => (
+            <div key={i} className="flex items-center gap-2 text-[11px] p-1.5 rounded bg-dark-700/50">
+              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: SEV[a.severity] || '#475569' }} />
+              <span className="text-slate-300 truncate flex-1">{a.type} <span className="text-slate-600 font-mono">{a.source}→{a.destination}</span></span>
+              <button
+                onClick={() => onBlock(a.source)}
+                disabled={blockingIp}
+                className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors text-[10px]"
+              >
+                {blockingIp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />} Bloquer
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[10px] text-slate-600 text-center py-2">Aucune intrusion détectée sur ce segment</p>
+      )}
+    </div>
+  )
+}
 
 export default function Sensors() {
   const { toast } = useToast()
@@ -12,6 +63,7 @@ export default function Sensors() {
   const [loading, setLoading] = useState(true)
   const [blockingIp, setBlockingIp] = useState(null)
   const [copiedKey, setCopiedKey] = useState('')
+  const [selectedDomain, setSelectedDomain] = useState('all')
 
   useEffect(() => {
     const load = () => {
@@ -35,27 +87,43 @@ export default function Sensors() {
     finally { setBlockingIp(null) }
   }
 
-  // Regroupement par domaine
+  // Regroupement par domaine + synthèse
   const byDomain = {}
   for (const s of sensors) { const d = s.domain || '—'; (byDomain[d] = byDomain[d] || []).push(s) }
+  const domainNames = Object.keys(byDomain).sort()
+
+  const summaries = domainNames.map(domain => {
+    const list = byDomain[domain]
+    const domAlerts = list.flatMap(s => alertsFor(s))
+    const bySev = { critical: 0, high: 0, medium: 0, low: 0 }
+    domAlerts.forEach(a => { if (bySev[a.severity] !== undefined) bySev[a.severity]++ })
+    return {
+      domain, list,
+      online: list.filter(s => s.status === 'online').length,
+      total: list.length,
+      segments: new Set(list.map(s => s.segment)).size,
+      alerts: domAlerts.length,
+      bySev,
+    }
+  })
 
   const online = sensors.filter(s => s.status === 'online').length
-  const domains = Object.keys(byDomain).filter(d => d !== '—').length || (sensors.length ? 1 : 0)
   const eastWest = alerts.filter(a => a.probe && a.probe !== 'LOCAL' && a.probe !== 'SENSOR-LOCAL').length
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://sentinet.devantiq.com'
   const steps = [
     { key: 'prereq', label: 'Prérequis sur la machine à superviser (Linux, accès root)',
-      cmd: 'sudo apt update && sudo apt install -y nodejs tcpdump\nsudo mkdir -p /opt/sentinet-agent' },
-    { key: 'copy', label: 'Télécharger l\'agent sur la machine cible (aucun scp — via le serveur)',
+      cmd: 'apt update && apt install -y nodejs tcpdump' },
+    { key: 'copy', label: 'Télécharger l\'agent (aucun scp — directement depuis le serveur)',
       cmd: `mkdir -p /opt/sentinet-agent\ncurl -fsSL ${origin}/api/agent/download -o /opt/sentinet-agent/sentinet-agent.js\nip -o link show   # repérer l'interface à écouter` },
-    { key: 'run', label: 'Lancer l\'agent (adapter clé, domaine, réseau, sous-réseau, interface)',
-      cmd: `sudo SENTINET_URL=${origin} \\\n  AGENT_KEY=<votre_clef_partagée> \\\n  AGENT_DOMAIN=devantiq.com \\\n  AGENT_NETWORK="LAN Siège" \\\n  AGENT_SUBNET=10.0.0.0/24 \\\n  IFACE=eth0 \\\n  node /opt/sentinet-agent/sentinet-agent.js` },
+    { key: 'run', label: 'Lancer l\'agent (AGENT_ID unique · AGENT_DOMAIN = domaine réel · AGENT_NETWORK = libellé)',
+      cmd: `AGENT_ID=<id-unique> AGENT_DOMAIN=<domaine> AGENT_NETWORK="<libellé>" \\\n  SENTINET_URL=${origin} AGENT_KEY=<votre_clef> \\\n  AGENT_SUBNET=<sous-réseau> IFACE=<interface> \\\n  node /opt/sentinet-agent/sentinet-agent.js` },
   ]
-
   const copy = (text, key) => {
     try { navigator.clipboard.writeText(text); setCopiedKey(key); setTimeout(() => setCopiedKey(''), 1500) } catch {}
   }
+
+  const focus = selectedDomain !== 'all' ? summaries.find(s => s.domain === selectedDomain) : null
 
   return (
     <div className="p-6 space-y-6">
@@ -63,7 +131,7 @@ export default function Sensors() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Sondes en ligne', value: `${online}/${sensors.length}`, icon: Wifi, color: 'text-cyber-400' },
-          { label: 'Domaines supervisés', value: domains, icon: Globe, color: 'text-blue-400' },
+          { label: 'Domaines supervisés', value: domainNames.filter(d => d !== '—').length, icon: Globe, color: 'text-blue-400' },
           { label: 'Segments réseau', value: new Set(sensors.map(s => s.segment)).size, icon: NetIcon, color: 'text-purple-400' },
           { label: 'Alertes est-ouest', value: eastWest, icon: ShieldAlert, color: eastWest ? 'text-red-400' : 'text-slate-400' },
         ].map(({ label, value, icon: Icon, color }) => (
@@ -76,73 +144,84 @@ export default function Sensors() {
         ))}
       </div>
 
-      {/* Sondes par domaine */}
-      {Object.entries(byDomain).map(([domain, list]) => (
-        <div key={domain}>
-          <div className="flex items-center gap-2 mb-3">
-            <Globe className="w-4 h-4 text-cyber-400" />
-            <h2 className="text-sm font-semibold text-white">Domaine : {domain}</h2>
-            <span className="text-[10px] text-slate-500">({list.length} sonde{list.length > 1 ? 's' : ''})</span>
+      {/* Barre de sélection de domaine */}
+      <div className="card px-4 py-3 flex items-center gap-3 flex-wrap">
+        <Globe className="w-4 h-4 text-cyber-400 flex-shrink-0" />
+        <span className="text-xs text-slate-400">Domaine :</span>
+        <select
+          value={selectedDomain}
+          onChange={e => setSelectedDomain(e.target.value)}
+          className="px-3 py-1.5 rounded-lg bg-dark-700 border border-dark-600 text-xs text-slate-200 outline-none cursor-pointer min-w-[180px]"
+        >
+          <option value="all">Tous les domaines ({domainNames.length})</option>
+          {domainNames.map(d => (
+            <option key={d} value={d}>{d === '—' ? 'Non renseigné' : d} — {byDomain[d].length} sonde{byDomain[d].length > 1 ? 's' : ''}</option>
+          ))}
+        </select>
+        <span className="text-[10px] text-slate-600 ml-auto hidden sm:block">
+          {selectedDomain === 'all' ? 'Vue d\'ensemble — cliquez un domaine pour le détail' : 'Vue détaillée du domaine'}
+        </span>
+      </div>
+
+      {/* ── Vue d'ensemble (tous les domaines) — compacte ─────────────────────── */}
+      {selectedDomain === 'all' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {summaries.map(sm => (
+            <button
+              key={sm.domain}
+              onClick={() => setSelectedDomain(sm.domain)}
+              className="card p-4 text-left hover:border-cyber-500/40 transition-colors group"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Globe className="w-4 h-4 text-cyber-400 flex-shrink-0" />
+                  <span className="text-sm font-semibold text-white truncate">{sm.domain === '—' ? 'Non renseigné' : sm.domain}</span>
+                </div>
+                <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border ${sm.online === sm.total ? 'text-cyber-400 bg-cyber-500/10 border-cyber-500/25' : 'text-yellow-400 bg-yellow-500/10 border-yellow-500/25'}`}>
+                  <Wifi className="w-3 h-3" />{sm.online}/{sm.total}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <div><p className="text-[10px] text-slate-500">Sondes</p><p className="text-sm font-bold font-mono text-slate-200">{sm.total}</p></div>
+                <div><p className="text-[10px] text-slate-500">Segments</p><p className="text-sm font-bold font-mono text-slate-200">{sm.segments}</p></div>
+                <div><p className="text-[10px] text-slate-500">Alertes</p><p className={`text-sm font-bold font-mono ${sm.alerts ? 'text-red-400' : 'text-slate-200'}`}>{sm.alerts}</p></div>
+              </div>
+              {/* Répartition sévérité */}
+              <div className="flex items-center gap-3 text-[10px] font-mono pt-2 border-t border-dark-600">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: SEV.critical }} />{sm.bySev.critical}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: SEV.high }} />{sm.bySev.high}</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: SEV.medium }} />{sm.bySev.medium}</span>
+                <span className="ml-auto flex items-center gap-1 text-cyber-400 group-hover:text-cyber-300">Détail <ChevronRight className="w-3 h-3" /></span>
+              </div>
+            </button>
+          ))}
+          {summaries.length === 0 && !loading && (
+            <p className="text-xs text-slate-500 col-span-full py-6 text-center">Aucune sonde. Déployez un agent ci-dessous.</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Vue détaillée (un domaine) ────────────────────────────────────────── */}
+      {focus && (
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <button onClick={() => setSelectedDomain('all')} className="flex items-center gap-1 text-xs text-slate-400 hover:text-cyber-400 transition-colors">
+              <ArrowLeft className="w-3.5 h-3.5" /> Tous les domaines
+            </button>
+            <span className="text-slate-600">/</span>
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-cyber-400" />
+              <h2 className="text-sm font-semibold text-white">{focus.domain === '—' ? 'Non renseigné' : focus.domain}</h2>
+              <span className="text-[10px] text-slate-500">· {focus.online}/{focus.total} en ligne · {focus.alerts} alerte(s)</span>
+            </div>
           </div>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {list.map(s => {
-              const sa = alertsFor(s).slice(0, 5)
-              const online = s.status === 'online'
-              return (
-                <div key={s.id} className="card p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      {s.kind === 'agent' ? <Radar className="w-4 h-4 text-cyber-400" /> : <Server className="w-4 h-4 text-blue-400" />}
-                      <div>
-                        <h3 className="text-xs font-semibold text-white flex items-center gap-1.5 flex-wrap">
-                          {s.host} <span className="text-slate-500 font-normal">· {s.segment}</span>
-                          {s.domain && s.domain !== '—' && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-normal text-cyber-300 bg-cyber-500/10 border border-cyber-500/25 rounded px-1.5 py-0.5">
-                              <Globe className="w-2.5 h-2.5" />{s.domain}
-                            </span>
-                          )}
-                        </h3>
-                        <p className="text-[10px] text-slate-500 font-mono">
-                          {s.kind === 'agent' ? 'Agent' : 'Sonde locale'}{s.subnet ? ` · ${s.subnet}` : ''}{s.iface ? ` · ${s.iface}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border ${online ? 'text-cyber-400 bg-cyber-500/10 border-cyber-500/25' : 'text-slate-400 bg-dark-700 border-dark-600'}`}>
-                      {online ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}{online ? 'En ligne' : 'Hors ligne'}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 mb-3 pt-2 border-t border-dark-600">
-                    <div className="text-center"><p className="text-[10px] text-slate-500">Charge</p><p className="text-sm font-bold font-mono text-slate-200">{s.load}%</p></div>
-                    <div className="text-center"><p className="text-[10px] text-slate-500">Flux</p><p className="text-sm font-bold font-mono text-slate-200">{s.connections}</p></div>
-                    <div className="text-center"><p className="text-[10px] text-slate-500">Alertes</p><p className={`text-sm font-bold font-mono ${sa.length ? 'text-red-400' : 'text-slate-200'}`}>{alertsFor(s).length}</p></div>
-                  </div>
-                  {/* Intrusions détectées sur ce segment */}
-                  {sa.length > 0 ? (
-                    <div className="space-y-1.5">
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Intrusions récentes</p>
-                      {sa.map((a, i) => (
-                        <div key={i} className="flex items-center gap-2 text-[11px] p-1.5 rounded bg-dark-700/50">
-                          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: SEV[a.severity] || '#475569' }} />
-                          <span className="text-slate-300 truncate flex-1">{a.type} <span className="text-slate-600 font-mono">{a.source}→{a.destination}</span></span>
-                          <button
-                            onClick={() => handleBlock(a.source)}
-                            disabled={blockingIp}
-                            className="flex-shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors text-[10px]"
-                          >
-                            {blockingIp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />} Bloquer
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-slate-600 text-center py-2">Aucune intrusion détectée sur ce segment</p>
-                  )}
-                </div>
-              )
-            })}
+            {focus.list.map(s => (
+              <SensorCard key={s.id} s={s} alertsFor={alertsFor} onBlock={handleBlock} blockingIp={blockingIp} />
+            ))}
           </div>
         </div>
-      ))}
+      )}
 
       {/* Déployer un agent — procédure pas-à-pas */}
       <div className="card p-5">
@@ -152,9 +231,8 @@ export default function Sensors() {
         </div>
         <p className="text-xs text-slate-500 mb-4">
           Un agent capture le trafic du segment où il est installé et remonte les intrusions ici, sous son domaine.
-          La <span className="text-slate-300 font-medium">clé d'agent</span> doit être identique à <span className="font-mono text-slate-300">AGENT_KEY</span> du serveur.
+          La <span className="text-slate-300 font-medium">clé d'agent</span> doit être identique à <span className="font-mono text-slate-300">AGENT_KEY</span> du serveur ; l'<span className="font-mono text-slate-300">AGENT_ID</span> doit être unique par machine.
         </p>
-
         <ol className="space-y-4">
           {steps.map((s, i) => (
             <li key={s.key} className="flex gap-3">
@@ -176,7 +254,6 @@ export default function Sensors() {
               <p className="text-xs text-slate-300">Faire tourner l'agent en permanence (redémarrage auto)</p>
               <p className="text-[11px] text-slate-500 mt-1">
                 Service <span className="font-mono text-slate-400">systemd</span> prêt à copier dans <span className="font-mono text-slate-400">agent/README.md</span> (section « Exécution permanente »).
-                Vérifie ensuite l'agent dans cette page : il apparaît en ligne sous son domaine.
               </p>
             </div>
           </li>
