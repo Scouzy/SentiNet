@@ -3,10 +3,30 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Search, Filter, ChevronDown, ChevronRight, Shield, X,
   AlertTriangle, Clock, Server, Globe, ArrowRight, ExternalLink,
-  CheckCircle, Eye, Zap, Copy, Loader2
+  CheckCircle, Eye, Zap, Copy, Loader2, CheckSquare, Square, Ban, Trash2
 } from 'lucide-react'
 import { api } from '../services/api'
 import { useToast } from '../components/UI/Toast'
+import { recommendation, isOrphan } from '../utils/triage'
+
+const RECO_TONE = {
+  critical: 'bg-red-500/15 text-red-300 border-red-500/30',
+  high: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+  medium: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+  low: 'bg-slate-500/15 text-slate-400 border-slate-500/25',
+}
+
+function RecoBadge({ alert }) {
+  const r = recommendation(alert)
+  return (
+    <span
+      title={r.target ? `Cible : ${r.target}` : undefined}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${RECO_TONE[r.tone]}`}
+    >
+      {r.label}
+    </span>
+  )
+}
 
 function SeverityBadge({ severity }) {
   const map = {
@@ -216,9 +236,13 @@ function AlertDetail({ alert, onClose, onStatusChange }) {
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 }
 
 export default function Alerts() {
+  const { toast } = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const [alerts, setAlerts] = useState([])
+  const [sensors, setSensors] = useState([])
   const [search, setSearch] = useState(searchParams.get('q') || '')
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [busy, setBusy] = useState('')
 
   useEffect(() => {
     const q = searchParams.get('q')
@@ -233,17 +257,26 @@ export default function Alerts() {
   const [filterSegment, setFilterSegment] = useState('all')
   const [selectedAlert, setSelectedAlert] = useState(null)
 
+  const loadAlerts = useCallback(
+    () => api.getAlerts().then(d => d.alerts && setAlerts(d.alerts)).catch(() => {}), [])
+
   useEffect(() => {
-    const load = () => api.getAlerts().then(d => d.alerts && setAlerts(d.alerts)).catch(() => {})
-    load()
-    const id = setInterval(load, 5000)
+    loadAlerts()
+    api.getSensors().then(d => d.sensors && setSensors(d.sensors)).catch(() => {})
+    const id = setInterval(() => {
+      loadAlerts()
+      api.getSensors().then(d => d.sensors && setSensors(d.sensors)).catch(() => {})
+    }, 5000)
     return () => clearInterval(id)
-  }, [])
+  }, [loadAlerts])
 
   const handleStatusChange = useCallback((id, status) => {
     setAlerts(prev => prev.map(a => a.id === id ? { ...a, status } : a))
     setSelectedAlert(prev => prev?.id === id ? { ...prev, status } : prev)
   }, [])
+
+  const liveProbes = new Set(sensors.map(s => s.id).filter(Boolean))
+  const orphanAlerts = alerts.filter(a => isOrphan(a, liveProbes))
 
   const domains = ['all', ...Array.from(new Set(alerts.map(a => a.domain).filter(d => d && d !== '—')))]
   const segments = ['all', ...Array.from(new Set(alerts.map(a => a.segment).filter(Boolean)))]
@@ -276,6 +309,47 @@ export default function Alerts() {
     blocked: alerts.filter(a => a.status === 'blocked').length,
   }
 
+  // ── Sélection ───────────────────────────────────────────────────────────────
+  const toggleOne = useCallback((id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }, [])
+  const filteredIds = filtered.map(a => a.id)
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selectedIds.has(id))
+  const toggleAllFiltered = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (allFilteredSelected) filteredIds.forEach(id => next.delete(id))
+      else filteredIds.forEach(id => next.add(id))
+      return next
+    })
+  }
+  const selectOrphans = () => setSelectedIds(new Set(orphanAlerts.map(a => a.id)))
+  const clearSelection = () => setSelectedIds(new Set())
+
+  // ── Actions groupées ──────────────────────────────────────────────────────────
+  const runBulk = async (action, ids) => {
+    const list = ids || [...selectedIds]
+    if (list.length === 0) { toast('Aucune alerte sélectionnée', 'error'); return }
+    setBusy(action)
+    try {
+      const r = await api.bulkAlerts(list, action)
+      const msg = action === 'block'
+        ? `${r.blocked} IP bloquée(s)${r.already ? `, ${r.already} déjà` : ''}${r.whitelisted ? `, ${r.whitelisted} en liste blanche` : ''}`
+        : `${r.updated} alerte(s) mises à jour`
+      toast(`✓ ${msg}`, 'success')
+      clearSelection()
+      await loadAlerts()
+    } catch (e) {
+      toast(e.message || 'Échec de l’action groupée', 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4">
       {selectedAlert && <AlertDetail alert={selectedAlert} onClose={() => setSelectedAlert(null)} onStatusChange={handleStatusChange} />}
@@ -294,6 +368,76 @@ export default function Alerts() {
           </div>
         ))}
       </div>
+
+      {/* Nettoyage des orphelines (anciens agents / backlog) */}
+      {orphanAlerts.length > 0 && (
+        <div className="card px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2 border-orange-500/25 bg-orange-500/5">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Trash2 className="w-4 h-4 text-orange-400 flex-shrink-0" />
+            <p className="text-xs text-slate-300">
+              <span className="font-semibold text-orange-300">{orphanAlerts.length} alerte(s) orphelines</span>
+              {' '}rattachées à d’anciennes sondes (agents relancés / backlog). Non actionnables dans la topologie actuelle.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={selectOrphans}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-dark-700 border border-dark-600 text-slate-300 hover:text-white transition-colors"
+            >
+              Sélectionner
+            </button>
+            <button
+              onClick={() => runBulk('close', orphanAlerts.map(a => a.id))}
+              disabled={busy === 'close'}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-orange-500/15 border border-orange-500/30 text-orange-300 hover:bg-orange-500/25 transition-colors disabled:opacity-50"
+            >
+              {busy === 'close' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+              Clôturer les {orphanAlerts.length}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Barre d'actions groupées */}
+      {selectedIds.size > 0 && (
+        <div className="card px-4 py-3 flex flex-wrap items-center gap-2 border-cyber-500/30 bg-cyber-500/5">
+          <span className="text-xs font-semibold text-cyber-300">{selectedIds.size} sélectionnée(s)</span>
+          <span className="text-xs text-slate-500 hidden sm:inline">— action groupée :</span>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            <button
+              onClick={() => runBulk('investigate')}
+              disabled={!!busy}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20 transition-colors disabled:opacity-50"
+            >
+              {busy === 'investigate' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+              Investigation
+            </button>
+            <button
+              onClick={() => runBulk('block')}
+              disabled={!!busy}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            >
+              {busy === 'block' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />}
+              Bloquer (IP recommandée)
+            </button>
+            <button
+              onClick={() => runBulk('close')}
+              disabled={!!busy}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-500/10 border border-slate-500/30 text-slate-300 hover:bg-slate-500/20 transition-colors disabled:opacity-50"
+            >
+              {busy === 'close' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+              Clôturer
+            </button>
+            <button
+              onClick={clearSelection}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-dark-700 border border-dark-600 text-slate-400 hover:text-white transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+              Désélectionner
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Filters — 2 rows */}
       <div className="card px-4 py-3 space-y-2">
@@ -377,10 +521,15 @@ export default function Alerts() {
             <div
               key={alert.id}
               onClick={() => setSelectedAlert(alert)}
-              className="px-4 py-3 hover:bg-dark-750 transition-colors cursor-pointer"
+              className={`px-4 py-3 hover:bg-dark-750 transition-colors cursor-pointer ${selectedIds.has(alert.id) ? 'bg-cyber-500/5' : ''}`}
             >
               <div className="flex items-start justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={(e) => { e.stopPropagation(); toggleOne(alert.id) }} className="flex-shrink-0">
+                    {selectedIds.has(alert.id)
+                      ? <CheckSquare className="w-4 h-4 text-cyber-400" />
+                      : <Square className="w-4 h-4 text-slate-600" />}
+                  </button>
                   <SeverityBadge severity={alert.severity} />
                   <StatusBadge status={alert.status} />
                 </div>
@@ -390,6 +539,7 @@ export default function Alerts() {
               </div>
               <p className="text-xs font-medium text-slate-200 mb-0.5">{alert.type}</p>
               <p className="text-[10px] text-slate-500 truncate mb-1.5">{alert.description}</p>
+              <div className="mb-1.5"><RecoBadge alert={alert} /></div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-mono text-slate-500 truncate">{alert.source}</span>
                 <span className={`text-xs font-bold font-mono flex-shrink-0 ${
@@ -407,6 +557,11 @@ export default function Alerts() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-dark-600">
+                <th className="px-3 py-3 w-10">
+                  <button onClick={toggleAllFiltered} title="Tout sélectionner (filtré)" className="text-slate-500 hover:text-cyber-300 transition-colors">
+                    {allFilteredSelected ? <CheckSquare className="w-4 h-4 text-cyber-400" /> : <Square className="w-4 h-4" />}
+                  </button>
+                </th>
                 <th className="hidden xl:table-cell px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">ID</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Sévérité</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Type</th>
@@ -424,17 +579,23 @@ export default function Alerts() {
                 <tr
                   key={alert.id}
                   onClick={() => setSelectedAlert(alert)}
-                  className="hover:bg-dark-750 transition-colors cursor-pointer group"
+                  className={`hover:bg-dark-750 transition-colors cursor-pointer group ${selectedIds.has(alert.id) ? 'bg-cyber-500/5' : ''}`}
                 >
+                  <td className="px-3 py-3 w-10" onClick={(e) => { e.stopPropagation(); toggleOne(alert.id) }}>
+                    {selectedIds.has(alert.id)
+                      ? <CheckSquare className="w-4 h-4 text-cyber-400" />
+                      : <Square className="w-4 h-4 text-slate-600 hover:text-slate-400" />}
+                  </td>
                   <td className="hidden xl:table-cell px-4 py-3">
                     <span className="text-xs font-mono text-slate-500">{alert.id}</span>
                   </td>
                   <td className="px-4 py-3">
                     <SeverityBadge severity={alert.severity} />
                   </td>
-                  <td className="px-4 py-3 max-w-[220px]">
+                  <td className="px-4 py-3 max-w-[240px]">
                     <span className="text-xs font-medium text-slate-200 block truncate">{alert.type}</span>
                     <p className="text-[10px] text-slate-500 mt-0.5 truncate">{alert.description}</p>
+                    <div className="mt-1"><RecoBadge alert={alert} /></div>
                   </td>
                   <td className="hidden lg:table-cell px-4 py-3 max-w-[260px]">
                     <div className="flex items-center gap-1 text-xs font-mono min-w-0">

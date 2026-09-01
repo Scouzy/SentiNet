@@ -454,6 +454,81 @@ app.patch('/api/blocks/:ip', async (req, res) => {
   res.json({ block: b })
 })
 
+// ── Triage en masse (EF-906) ─────────────────────────────────────────────────
+// IP à cibler selon le type d'alerte : pour un scan / mouvement latéral, la
+// source (l'attaquant / l'hôte compromis) ; sinon la destination (le C2 / l'IP
+// malveillante externe). Sert au blocage groupé.
+function triageTarget(a) {
+  const t = String(a.type || '')
+  if (/Balayage|latéral/i.test(t)) return a.source
+  return a.destination
+}
+
+// Blocage interne réutilisable (garde whitelist + pare-feu OS + repli gracieux).
+async function blockIp(rawIp, reason, actor) {
+  const ip = String(rawIp || '').trim().replace(/^\[|\]$/g, '')
+  const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)
+  const isIPv6 = /^[0-9a-fA-F:]+$/.test(ip)
+  if (!ip || (!isIPv4 && !isIPv6)) return { error: 'IP invalide', ip }
+  if (whitelist.isWhitelisted(ip)) {
+    audit.write('BLOCK_REFUSED_WHITELIST', actor, ip, { reason })
+    return { whitelisted: true, ip }
+  }
+  const existing = db.blocks.find(b => b.ip === ip)
+  if (existing) return { already: true, block: existing, ip }
+  const rule = `SentiNet_${ip.replace(/[.:]/g, '_').replace(/__+/g, '_')}`
+  const block = { ip, reason, since: new Date().toISOString(), permanent: false, rule, fwStatus: 'pending', expires: null }
+  db.blocks.push(block)
+  const applied = await platform.addFirewallBlock(ip, rule)
+  block.fwStatus = applied ? 'active' : 'tracked'
+  block.expires = new Date(Date.now() + 2 * 3600 * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  audit.write('BLOCK_HOST', actor, ip, { reason, rule, via: 'bulk' })
+  return { block, ip }
+}
+
+// Applique une action à un lot d'alertes : close | investigate | reopen | block.
+app.post('/api/alerts/bulk', async (req, res) => {
+  const { ids, action, actor = 'user' } = req.body || {}
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids requis' })
+  const set = new Set(ids)
+  const targets = db.alerts.filter(a => set.has(a.id))
+  const STATUS = { close: 'closed', investigate: 'investigating', reopen: 'open' }
+
+  if (STATUS[action]) {
+    let updated = 0
+    for (const a of targets) {
+      if (a.status !== STATUS[action]) { a.status = STATUS[action]; a.updatedAt = new Date().toISOString(); updated++ }
+    }
+    audit.write('ALERT_BULK', actor, action, { updated, requested: targets.length })
+    saveDb()
+    return res.json({ ok: true, action, updated, requested: targets.length })
+  }
+
+  if (action === 'block') {
+    const results = { blocked: 0, already: 0, whitelisted: 0, invalid: 0, ips: [] }
+    const seen = new Map()
+    for (const a of targets) {
+      const ip = triageTarget(a)
+      if (!ip || ip === '—') { results.invalid++; continue }
+      if (!seen.has(ip)) {
+        const r = await blockIp(ip, `Blocage groupé — ${a.type}`, actor)
+        seen.set(ip, r)
+        if (r.whitelisted) results.whitelisted++
+        else if (r.already) results.already++
+        else if (r.error) results.invalid++
+        else { results.blocked++; results.ips.push(ip) }
+      }
+      const r = seen.get(ip)
+      if (r && !r.error && !r.whitelisted) { a.status = 'blocked'; a.updatedAt = new Date().toISOString() }
+    }
+    audit.write('ALERT_BULK', actor, 'block', { blocked: results.blocked, already: results.already, whitelisted: results.whitelisted, invalid: results.invalid })
+    saveDb()
+    return res.json({ ok: true, action, ...results })
+  }
+
+  return res.status(400).json({ error: `Action inconnue : ${action}` })
+})
+
 // ── Users CRUD ────────────────────────────────────────────────────────────────
 app.get('/api/users', (_req, res) => res.json({ users: db.users.map(publicUser) }))
 

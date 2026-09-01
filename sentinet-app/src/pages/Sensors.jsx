@@ -108,7 +108,12 @@ export default function Sensors() {
   })
 
   const online = sensors.filter(s => s.status === 'online').length
-  const eastWest = alerts.filter(a => a.probe && a.probe !== 'LOCAL' && a.probe !== 'SENSOR-LOCAL').length
+  // Est-ouest « vivant » = alertes rattachées à une sonde-agent actuellement active.
+  // Les orphelines (ancien agentId) sont comptées à part pour lever l'ambiguïté.
+  const liveProbeIds = new Set(sensors.map(s => s.id).filter(Boolean))
+  const agentAlerts = alerts.filter(a => a.probe && a.probe !== 'LOCAL' && a.probe !== 'SENSOR-LOCAL')
+  const eastWest = agentAlerts.filter(a => liveProbeIds.has(a.probe)).length
+  const eastWestOrphan = agentAlerts.length - eastWest
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://sentinet.devantiq.com'
   const steps = [
@@ -133,11 +138,16 @@ export default function Sensors() {
           { label: 'Sondes en ligne', value: `${online}/${sensors.length}`, icon: Wifi, color: 'text-cyber-400' },
           { label: 'Domaines supervisés', value: domainNames.filter(d => d !== '—').length, icon: Globe, color: 'text-blue-400' },
           { label: 'Segments réseau', value: new Set(sensors.map(s => s.segment)).size, icon: NetIcon, color: 'text-purple-400' },
-          { label: 'Alertes est-ouest', value: eastWest, icon: ShieldAlert, color: eastWest ? 'text-red-400' : 'text-slate-400' },
-        ].map(({ label, value, icon: Icon, color }) => (
+          { label: 'Alertes est-ouest', value: eastWest, icon: ShieldAlert, color: eastWest ? 'text-red-400' : 'text-slate-400',
+            sub: eastWestOrphan > 0 ? `+${eastWestOrphan} orphelines à trier` : null },
+        ].map(({ label, value, icon: Icon, color, sub }) => (
           <div key={label} className="card p-5">
             <div className="flex items-start justify-between">
-              <div><p className="text-xs text-slate-500 mb-1">{label}</p><p className={`text-2xl font-bold font-mono ${color}`}>{loading ? '—' : value}</p></div>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">{label}</p>
+                <p className={`text-2xl font-bold font-mono ${color}`}>{loading ? '—' : value}</p>
+                {sub && <p className="text-[10px] text-orange-400/80 mt-0.5">{sub}</p>}
+              </div>
               <Icon className={`w-5 h-5 ${color} opacity-60`} />
             </div>
           </div>

@@ -62,6 +62,7 @@ export const api = {
   // Alerts
   getAlerts: () => get('/alerts'),
   updateAlert: (id, data) => patch(`/alerts/${id}`, data),
+  bulkAlerts: (ids, action) => post('/alerts/bulk', { ids, action }),
 
   // Blocks
   getBlocks: () => get('/blocks'),
