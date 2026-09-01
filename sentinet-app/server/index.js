@@ -85,9 +85,9 @@ app.use(express.json({ limit: '4mb' })) // marge pour les lots de connexions rem
 const AGENT_KEY = process.env.AGENT_KEY || ''
 
 // Domaine supervisé par la sonde locale (affiché dans « Sondes & Agents »)
-const SERVER_DOMAIN = process.env.SERVER_DOMAIN || (() => {
+const SERVER_DOMAIN = (process.env.SERVER_DOMAIN || (() => {
   try { return new URL(process.env.CORS_ORIGIN || '').hostname || os.hostname() } catch { return os.hostname() }
-})()
+})()).trim().toLowerCase()
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
@@ -705,11 +705,14 @@ app.post('/api/agent/ingest', (req, res) => {
   const agentId = String(b.agentId || '').trim()
   if (!agentId) return res.status(400).json({ error: 'agentId requis' })
   const connections = Array.isArray(b.connections) ? b.connections : []
+  // Normalisation de la casse du domaine : « NotEazy.com » et « noteazy.com »
+  // doivent désigner la même sonde/le même regroupement (évite les doublons de carte).
+  const domain = (b.domain || '—').trim().toLowerCase() || '—'
   const isNew = !agents.has(agentId)
   agents.set(agentId, {
     id: agentId,
     host: b.host || agentId,
-    domain: b.domain || '—',
+    domain,
     network: b.network || '—',
     subnet: b.subnet || '',
     iface: b.iface || '',
@@ -720,12 +723,12 @@ app.post('/api/agent/ingest', (req, res) => {
     lastSeen: new Date().toISOString(),
     lastSeenTs: Date.now(),
   })
-  if (isNew) audit.write('AGENT_REGISTER', agentId, b.host || agentId, { domain: b.domain, network: b.network })
+  if (isNew) audit.write('AGENT_REGISTER', agentId, b.host || agentId, { domain, network: b.network })
   // Analyse du trafic OBSERVÉ par l'agent (sans auto-exclusion locale)
   try {
     detection.analyze(connections, Number(b.throughputMbps) || 0, {
       excludeLocal: false,
-      tag: { probe: agentId, segment: b.network || 'AGENT', domain: b.domain || '—' },
+      tag: { probe: agentId, segment: b.network || 'AGENT', domain },
     })
     detection.trackSessions(connections)
   } catch (e) { console.warn('[AGENT] analyse:', e.message) }
